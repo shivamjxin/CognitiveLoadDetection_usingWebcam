@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import time
 import numpy as np
+import json
 
 
 mp_face_mesh = mp.solutions.face_mesh
@@ -27,6 +28,7 @@ cap.set(cv2.CAP_PROP_FPS, 30)
 
 # Variables for FPS calculation
 pTime = 0
+frame_id = 0  # counter for packet indexing to make debugging easier
 
 #print("Starting Camera press 'q' to quit.")
 
@@ -55,10 +57,27 @@ camera_matrix = np.array([
 dist_coeffs = np.zeros((4, 1), dtype=np.float64)
 
 while cap.isOpened():
+
+    # grab UNIX epoch timestamp the moment loop starts
+    start_time_ms = int(time.time()*1000)
+
     success, frame = cap.read()
     if not success:
         print("Ignoring failed frame.")
         continue
+
+    frame_id += 1
+
+    # intialize packets for this frame
+    raw_frame_packet = {
+        "frame_id": frame_id,
+        "start_time_ms": start_time_ms,
+        "no_face": True,
+        "head_pose": None,
+        "head_normalized_eyes": None,
+        "original_2d_landmarks": None
+
+    }
 
     frame.flags.writeable = False  #  making the array const to avoid changes to be made and not creating a copy rather passing frame by reference to Mediapipe (cpp)
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # openCV image read as BGR need to convert to RGB for the neural net
@@ -70,12 +89,19 @@ while cap.isOpened():
 
 
     if results.multi_face_landmarks:  # checking for face
+
+        raw_frame_packet["no_face"] = False
+
         for face_landmarks in results.multi_face_landmarks:  # face_landmark contains 468 points on face and 10 points for iris since explicitly set
+
+            # storing all of the og 2d landmarks for now (later if need be RESTRICT to SAVE BANDWIDTH)
+            # used in ml pipeline etc to detect blink, calculate EAR etc
+            raw_landmarks_2d = [{"x": lm.x, "y": lm.y} for lm in face_landmarks.landmark]
+            raw_frame_packet["original_2d_landmarks"] = raw_landmarks_2d
 
             # 6 anchors points for head-pose normalization namely Nose Tip, Nose Bridge, Left Eye Outer, Left Eye Inner, Right Eye Inner, Right Eye Outer
             anchor_indices = [1, 168, 33, 133, 362, 263]
             image_points_denormalized = []
-
             frame_height, frame_width, _ = frame.shape
 
             for index in anchor_indices:
@@ -93,29 +119,56 @@ while cap.isOpened():
             image_points = np.array(image_points_denormalized, dtype=np.float64)  # since face_3d_model is a np.array and solvePnP requires similar dtypes
 
             # Run the PnP Math
-            success, rotation_vector, translation_vector = cv2.solvePnP(
+            success_pnp, rotation_vector, translation_vector = cv2.solvePnP(
                 face_3d_model, 
                 image_points, 
                 camera_matrix, 
                 dist_coeffs
             )
 
-            if success:
+            if success_pnp:
                 # Convert the calculus vector into a 3x3 Rotation Matrix
                 rmat, _ = cv2.Rodrigues(rotation_vector)
                 
                 # Decompose the Matrix into human-readable degrees
                 angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
                 
-                pitch = angles[0]
-                yaw = angles[1] 
-                roll = angles[2]
+                pitch, yaw, roll = angles[0], angles[1], angles[2]
+
+                raw_frame_packet["head_pose"] = {
+                                                "pitch": pitch,
+                                                 "yaw": yaw,
+                                                 "roll": roll
+                                                 }
                 
                 # Display the real-time angles on the screen!
                 cv2.putText(frame, f'Pitch: {int(pitch)}', (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f'Yaw:   {int(yaw)}', (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f'Roll:  {int(roll)}', (20, 190), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-            # to build the `raw_frame_packet` for Person 3.
+
+                # HEAD POSE NORM
+                rmat_inverse = np.linalg.inv(rmat)  # inverse rot matrix needed to unskew the face
+
+                # getting 3d coords for left iris center with inex: 468 and right iris center (473)   
+                # since we are applying the inverse rotation to only the eyes for now
+                left_iris = face_landmarks.landmark[468]
+                right_iris = face_landmarks.landmark[473]
+
+                # de-normalizing the coords and creating a 3x1 vector
+                left_eye_vec = np.array([[left_iris.x * frame_width], [left_iris.y * frame_height], [left_iris.z * frame_width]])
+                right_eye_vec = np.array([[right_iris.x * frame_width], [right_iris.y * frame_height], [right_iris.z * frame_width]])
+
+                # rotating the eyes back to dead center or frontal position or performing pose normalization
+                left_eye_normalized = rmat_inverse.dot(left_eye_vec)
+                right_eye_normalized = rmat_inverse.dot(right_eye_vec)
+
+                raw_frame_packet["head_normalized_eyes"] = {
+                    "left_x": float(left_eye_normalized[0][0]), "left_y": float(left_eye_normalized[1][0]),
+                    "right_x": float(right_eye_normalized[0][0]), "right_y": float(right_eye_normalized[1][0])
+                }
+    
+    print(json.dumps(raw_frame_packet))
+
 
     # Calculate and display FPS to ensure we are hitting our 30Hz target
     cTime = time.time()
