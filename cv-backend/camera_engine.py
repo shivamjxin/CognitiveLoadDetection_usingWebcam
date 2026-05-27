@@ -3,6 +3,7 @@ import mediapipe as mp
 import time
 import numpy as np
 import json
+import socketio
 
 
 mp_face_mesh = mp.solutions.face_mesh
@@ -55,6 +56,15 @@ camera_matrix = np.array([
 
 # Distance Coefficients assuming no distortion
 dist_coeffs = np.zeros((4, 1), dtype=np.float64)
+
+# client initialzation
+sio = socketio.Client()
+try:
+    sio.connect('http://localhost:5000')  # setting up connection to local webhost
+    is_connected = True
+except:
+    print("server is offline")
+    is_connected = False        # to be changed to create a strict dependency later
 
 while cap.isOpened():
 
@@ -167,7 +177,9 @@ while cap.isOpened():
                     "right_x": float(right_eye_normalized[0][0]), "right_y": float(right_eye_normalized[1][0])
                 }
     
-    print(json.dumps(raw_frame_packet))
+    #print(json.dumps(raw_frame_packet))
+    if is_connected:
+        sio.emit('cv_frame',raw_frame_packet)  # work as transmitter to send data to the server
 
 
     # Calculate and display FPS to ensure we are hitting our 30Hz target
