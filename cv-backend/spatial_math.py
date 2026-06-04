@@ -132,3 +132,50 @@ def calculate_ear(face_landmarks, frame_width, frame_height):
 
     # Return Average EAR
     return (left_ear + right_ear) / 2.0
+
+def calculate_gaze_ratios(face_landmarks, frame_width, frame_height):
+    """
+    Computes precise coordinate-based horizontal and vertical gaze ratios 
+    relative to the boundaries of the eye socket using MediaPipe landmarks.
+    """
+    # Helper to pull pixel coordinates
+    def get_pt(idx):
+        lm = face_landmarks.landmark[idx]
+        return np.array([lm.x * frame_width, lm.y * frame_height])
+
+    # Left Eye Points: Outer Corner (33), Inner Corner (133), Iris Center (468)
+    left_outer = get_pt(33)
+    left_inner = get_pt(133)
+    left_iris  = get_pt(468)
+
+    # Right Eye Points: Inner Corner (362), Outer Corner (263), Iris Center (473)
+    right_inner = get_pt(362)
+    right_outer = get_pt(263)
+    right_iris  = get_pt(473)
+
+    # left-eye horizontal ratio
+    # Calculate distance from outer corner to iris, and total width of eye socket
+    left_dist_out = np.linalg.norm(left_iris - left_outer)
+    left_total_width = np.linalg.norm(left_inner - left_outer) + 1e-6
+    left_h_ratio = left_dist_out / left_total_width
+
+    # right eye horizontal ratio
+    right_dist_in = np.linalg.norm(right_iris - right_inner)
+    right_total_width = np.linalg.norm(right_outer - right_inner) + 1e-6
+    right_h_ratio = right_dist_in / right_total_width
+
+    # Average the horizontal ratios (0.5 means dead center, < 0.5 looking right, > 0.5 looking left)
+    avg_h_gaze = (left_h_ratio + right_h_ratio) / 2.0
+
+    # VERTICAL RATIO
+    # Top lid center (159), Bottom lid center (145), Iris center (468)
+    left_top = get_pt(159)
+    left_bottom = get_pt(145)
+    left_v_dist = np.linalg.norm(left_iris - left_top)
+    left_total_height = np.linalg.norm(left_bottom - left_top) + 1e-6
+    avg_v_gaze = left_v_dist / left_total_height
+
+    return {
+        "horizontal_ratio": round(float(avg_h_gaze), 4),
+        "vertical_ratio": round(float(avg_v_gaze), 4)
+    } 

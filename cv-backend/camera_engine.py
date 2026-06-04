@@ -85,16 +85,22 @@ with open("../data_logs/cv_stream.jsonl", "a") as cv_log_file:
                     frame_width, 
                     frame_height
                 )
+
+                # getting gaze data
+                gaze_data = spatial_math.calculate_gaze_ratios(face_landmarks, frame_width, frame_height)
                 
                 # Package it up
                 raw_frame_packet["head_pose"] = pose_data
                 raw_frame_packet["head_normalized_eyes"] = normalized_eyes
                 raw_frame_packet["ear"] = avg_ear
+                raw_frame_packet["gaze_ratios"] = gaze_data
                 
                 # Display metrics on screen so you know it's working
                 cv2.putText(frame, f"Pitch: {int(pose_data['pitch'])}", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"Yaw: {int(pose_data['yaw'])}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"EAR: {round(avg_ear, 3)}", (20, 190), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                cv2.putText(frame, f"Gaze H: {gaze_data['horizontal_ratio']}", (20, 230), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                cv2.putText(frame, f"Gaze V: {gaze_data['vertical_ratio']}", (20, 270), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
 
         # Write data immediately to hard drive
         cv_log_file.write(json.dumps(raw_frame_packet) + "\n")
