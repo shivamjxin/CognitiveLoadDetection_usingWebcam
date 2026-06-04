@@ -62,7 +62,8 @@ with open("../data_logs/cv_stream.jsonl", "a") as cv_log_file:
             "no_face": True,
             "head_pose": None,
             "head_normalized_eyes": None,
-            "ear": None
+            "ear": None,
+            "gaze_ratios": None
         }
 
         # perform calculations if face is found
