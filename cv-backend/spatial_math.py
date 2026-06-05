@@ -42,8 +42,8 @@ def normalize_head_pose(face_landmarks, frame_width, frame_height):
     image_points_denormalized = []
     for index in ANCHOR_INDICES:
         landmark = face_landmarks.landmark[index]
-        x_pixel = int(landmark.x * frame_width)
-        y_pixel = int(landmark.y * frame_height)
+        x_pixel = float(landmark.x * frame_width)
+        y_pixel = float(landmark.y * frame_height)
         image_points_denormalized.append([x_pixel, y_pixel])
 
     image_points = np.array(image_points_denormalized, dtype=np.float64)
@@ -57,8 +57,8 @@ def normalize_head_pose(face_landmarks, frame_width, frame_height):
     )
 
     if not success_pnp:
-        # Failsafe if the math fails
-        return {"pitch": 0, "yaw": 0, "roll": 0}, np.eye(3), np.zeros((3,1))
+        # Using a standard 600mm (60cm) depth baseline to prevent coordinate collapse
+        return {"pitch": 0, "yaw": 0, "roll": 0}, np.eye(3), np.array([[0], [0], [600.0]], dtype=np.float64)
 
     # Extract Pitch, Yaw, Roll
     rmat, _ = cv2.Rodrigues(rotation_vector)   # convert the calculus vector into 3x3 rotation matrix
@@ -85,21 +85,41 @@ def get_normalized_landmarks(face_landmarks, rmat_inverse, translation_vector, f
     needed_indices = [
         33, 160, 158, 133, 153, 144, 159, 145, 468,  # Left Eye & Iris (for EAR + Vertical Gaze + Iris)
         362, 385, 387, 263, 373, 380, 473,           # Right Eye & Iris (for EAR + Iris) since vertical gaze calcuate only using left eye because of symmetry  
-        61, 291, 13, 14                              # Mouth corners and Lip borders
+        61, 291, 13, 14, 1                              # Mouth corners and Lip borders + Nose Tip as spatial origin points
     ]
     
+    focal_length = frame_width
+    center_x = frame_width / 2
+    center_y = frame_height / 2
+    
+    # Calculate a metric scaling factor using the eye anchors to transform normalized depth (z) to mm
+    lm_left_eye = face_landmarks.landmark[33]
+    lm_right_eye = face_landmarks.landmark[263]
+    norm_width = math.sqrt((lm_right_eye.x - lm_left_eye.x)**2 + (lm_right_eye.y - lm_left_eye.y)**2)
+    face_scale_mm = 90.0 / (norm_width + 1e-6)  # 90mm is the strict distance between corners in FACE_3D_MODEL
+    
+    Z_face = translation_vector[2][0]
     normalized_dict = {}
     
     for idx in needed_indices:
         lm = face_landmarks.landmark[idx]
-        # Construct raw 3D spatial vector in pixel space
-        raw_vec = np.array([[lm.x * frame_width], [lm.y * frame_height], [lm.z * frame_width]])
         
-        # Apply normalization sequence: Un-translate then Un-rotate
-        norm_vec = rmat_inverse.dot(raw_vec - translation_vector)
+        # Determine absolute metric depth in millimeters
+        Z_mm = Z_face + (lm.z * face_scale_mm)
         
-        # Flatten vector to a simple 1D array array: [X, Y, Z]
-        normalized_dict[idx] = norm_vec.flatten()
+        # Reverse pinhole projection to map screen pixels to true metric camera space (mm)
+        X_pixel = lm.x * frame_width
+        Y_pixel = lm.y * frame_height
+        
+        X_mm = (X_pixel - center_x) * Z_mm / focal_length
+        Y_mm = (Y_pixel - center_y) * Z_mm / focal_length
+        
+        P_camera = np.array([[X_mm], [Y_mm], [Z_mm]], dtype=np.float64)
+        
+        # Apply pose normalization (Un-translate then Un-rotate into canonical world space)
+        P_normalized = rmat_inverse.dot(P_camera - translation_vector)
+        
+        normalized_dict[idx] = P_normalized.flatten()
         
     return normalized_dict
 
@@ -130,8 +150,8 @@ def calculate_ear(normalized_dict):
     right_horizontal = np.linalg.norm(p1 - p4)
     right_ear = (right_vertical_1 + right_vertical_2) / (2.0 * right_horizontal + 1e-6)
 
-    # Return Average EAR
-    return (left_ear + right_ear) / 2.0
+    # Return Average EAR with force typecasting to avoid JSON serialization crahses
+    return float((left_ear + right_ear) / 2.0)
 
 def calculate_gaze_ratios(normalized_dict):
     """
@@ -187,13 +207,14 @@ def calculate_mouth_metrics(normalized_dict):
     lip_upper = normalized_dict[13]
     lip_lower = normalized_dict[14]
 
-    # Horizontal mouth expansion/stretch (AU14 metric base)
-    mouth_width = np.linalg.norm(mouth_left - mouth_right)
+    # STABLE DENOMINATOR: Rigid distance between outer eye corners
+    eye_stable_width = np.linalg.norm(normalized_dict[33] - normalized_dict[263]) + 1e-6
     
-    # Vertical lip compression line (AU24 metric base)
-    lip_gap = np.linalg.norm(lip_upper - lip_lower)
+    # Convert absolute measurements into scale-invariant ratios
+    mouth_width_ratio = np.linalg.norm(mouth_left - mouth_right) / eye_stable_width
+    lip_gap_ratio = np.linalg.norm(lip_upper - lip_lower) / eye_stable_width
 
     return {
-        "mouth_width_raw": round(float(mouth_width), 4),
-        "lip_gap_raw": round(float(lip_gap), 4)
+        "mouth_width_raw": round(float(mouth_width_ratio), 4),
+        "lip_gap_raw": round(float(lip_gap_ratio), 4)
     }
