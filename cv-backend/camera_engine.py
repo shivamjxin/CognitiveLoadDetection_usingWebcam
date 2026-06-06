@@ -63,7 +63,8 @@ with open("../data_logs/cv_stream.jsonl", "a") as cv_log_file:
             "head_pose": None,
             "head_normalized_eyes": None,
             "ear": None,
-            "gaze_ratios": None
+            "gaze_ratios": None,
+            "mouth_metrics": None
         }
 
         # perform calculations if face is found
@@ -73,35 +74,47 @@ with open("../data_logs/cv_stream.jsonl", "a") as cv_log_file:
             for face_landmarks in results.multi_face_landmarks:
                 frame_height, frame_width, _ = frame.shape
                 
-                # Get the Head Pose & Normalized Eyes
-                pose_data, normalized_eyes = spatial_math.normalize_head_pose(
-                    face_landmarks, 
-                    frame_width, 
-                    frame_height
-                )
-                
-                # Get the Blink Data (EAR)
-                avg_ear = spatial_math.calculate_ear(
+                # Get the Head Pose, rmat-inv and translation-vec for scale-invariant calculations  
+                pose_data, rmat_inverse, translation_vector = spatial_math.normalize_head_pose(
                     face_landmarks, 
                     frame_width, 
                     frame_height
                 )
 
-                # getting gaze data
-                gaze_data = spatial_math.calculate_gaze_ratios(face_landmarks, frame_width, frame_height)
+                # extract unified normalized 3D landmarks for an unskewed face
+                normalized_dict = spatial_math.get_normalized_landmarks(
+                    face_landmarks,
+                    rmat_inverse,
+                    translation_vector,
+                    frame_width,
+                    frame_height
+                )
+
+                # reconstructing normalized eye anchors for telemetry packet matching 
+                normalized_eyes = {
+                    "left_x": float(normalized_dict[468][0]), "left_y": float(normalized_dict[468][1]),
+                    "right_x": float(normalized_dict[473][0]), "right_y": float(normalized_dict[473][1])
+                }
+                
+                # Getting gemoteric normalized features
+                avg_ear = spatial_math.calculate_ear(normalized_dict)
+                gaze_data = spatial_math.calculate_gaze_ratios(normalized_dict)
+                mouth_data = spatial_math.calculate_mouth_metrics(normalized_dict)
                 
                 # Package it up
                 raw_frame_packet["head_pose"] = pose_data
                 raw_frame_packet["head_normalized_eyes"] = normalized_eyes
                 raw_frame_packet["ear"] = avg_ear
                 raw_frame_packet["gaze_ratios"] = gaze_data
+                raw_frame_packet["mouth_metrics"] = mouth_data
                 
                 # Display metrics on screen so you know it's working
                 cv2.putText(frame, f"Pitch: {int(pose_data['pitch'])}", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"Yaw: {int(pose_data['yaw'])}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"EAR: {round(avg_ear, 3)}", (20, 190), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"Gaze H: {gaze_data['horizontal_ratio']}", (20, 230), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
-                cv2.putText(frame, f"Gaze V: {gaze_data['vertical_ratio']}", (20, 270), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                cv2.putText(frame, f"Gaze V: {gaze_data['vertical_ratio']}", (20, 260), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                cv2.putText(frame, f"Mouth W: {mouth_data['mouth_width_raw']}", (20, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         # Write data immediately to hard drive
         cv_log_file.write(json.dumps(raw_frame_packet) + "\n")
