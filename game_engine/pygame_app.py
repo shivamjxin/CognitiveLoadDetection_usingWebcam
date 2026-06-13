@@ -31,7 +31,8 @@ class CognitiveStimulusApp:
         screen_info = pygame.display.Info()
         self.width = screen_info.current_w
         self.height = screen_info.current_h
-        
+        self.font = pygame.font.SysFont(None, 48)
+
         # Canvas Creation: Launch borderless fullscreen to prevent OS distractions.
         # Note: Pygame's grid origin (X:0, Y:0) is the absolute TOP-LEFT of the monitor.
         self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
@@ -121,14 +122,33 @@ class CognitiveStimulusApp:
                     self.current_state = 3 
                     self.state_start_time = time.time()
                     print("Transitioned to STATE 3: Max Flex")
+
+            #  STATE 3 ALGORITHM: 5-Second Max Flex 
+            elif self.current_state == 3:
+                if time_in_state >= 5.0:
+                    self.current_state = 4 
+                    self.state_start_time = time.time()
+                    print("Transitioned to STATE 4: Task Active")
             
             #  TELEMETRY LOGGING 
+            # Determine the correct flag string based on state
+            if self.current_state == 1:
+                calib_flag = self.current_target_label
+            elif self.current_state == 2:
+                calib_flag = "REST_BASE"
+            elif self.current_state == 3:
+                calib_flag = "MAX_FLEX"
+            elif self.current_state == 4:
+                calib_flag = "RUNNING"
+            else:
+                calib_flag = "MENU"
+
             # Construct the JSON packet matching the Phase 2 Blueprint specifications.
             log_packet = {
-                "epoch_time_ms": int(current_time * 1000), # UNIX Sync Anchor
+                "epoch_time_ms": int(current_time * 1000), 
                 "state_id": self.current_state,
-                "calibration_flag": self.current_target_label if self.current_state == 1 else ("REST_BASE" if self.current_state == 2 else "MENU"),
-                "task_shift_active": False # Default False, only True during the Shock Event
+                "calibration_flag": calib_flag,
+                "task_shift_active": False 
             }
             
             # Write row to file.
@@ -172,6 +192,23 @@ class CognitiveStimulusApp:
                 # Paint State 2 Targets
                 pygame.draw.circle(self.screen, color, target_pos, radius)
                 pygame.draw.circle(self.screen, (255, 0, 0), target_pos, 5)
+
+            # STATE 3 RENDERING: Max Flex Instructions
+            elif self.current_state == 3:
+                #  Render the text strings into images (Text, Anti-Alias True, RGB Color)
+                prompt_img = self.font.render("CLENCH JAW AND FLEX FACE AS HARD AS POSSIBLE!", True, (255, 50, 50))
+                
+                # Dynamic countdown math
+                seconds_left = 5 - int(time_in_state)
+                timer_img = self.font.render(f"Hold for {seconds_left} seconds...", True, (200, 200, 200))
+                
+                #  Get the geometric center of those text images
+                prompt_rect = prompt_img.get_rect(center=(self.width // 2, self.height // 2 - 40))
+                timer_rect = timer_img.get_rect(center=(self.width // 2, self.height // 2 + 40))
+                
+                #  Blit (stamp) the images onto the screen
+                self.screen.blit(prompt_img, prompt_rect)
+                self.screen.blit(timer_img, timer_rect)
 
             
             #  HARDWARE FLUSH & FRAME THROTTLE
