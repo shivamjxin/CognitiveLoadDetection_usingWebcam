@@ -2,6 +2,8 @@ import pygame
 import time
 import os
 import json
+import random
+import string
 
 class CognitiveStimulusApp:
     """
@@ -58,9 +60,11 @@ class CognitiveStimulusApp:
         self.calibration_targets = ["TOP_LEFT", "BOTTOM_RIGHT", "TOP_RIGHT", "BOTTOM_LEFT"]
         self.current_target_label = "NONE"
         
-        
+        # State 4 Variables: Task Grid Memory
+        self.search_grid = [] # Will hold the pre-calculated 5x5 board
+        self.target_character = "Q" # The specific item the user is hunting for
+
         #  TELEMETRY DATABASE CONNECTION (CROSS-PROCESS SYNC)
-        
         # We open the log file ONCE during boot and hold it open in 'append' ("a") mode.
         # If we opened and closed this file 60 times a second inside the loop, 
         # the Hard Drive I/O bottleneck would instantly destroy our frame rate.
@@ -69,6 +73,55 @@ class CognitiveStimulusApp:
         self.log_file = open(log_path, "a")
         
         print(f"System initialized. Logging to: {log_path}")
+
+    def _generate_task_grid(self):
+            """
+            PRE-COMPUTATION ENGINE FOR STATE 4
+            Calculates the (X, Y) pixel coordinates and generates random characters 
+            for a 5x5 search grid. This is called exactly ONCE before entering State 4 
+            to prevent math calculations from lagging the 60Hz render loop.
+            """
+            self.search_grid = [] # Clear any previous memory
+            grid_size = 5
+            cell_size = 100 # 100x100 pixel boundary per letter
+            
+            # Total size of the physical grid on screen
+            total_width = grid_size * cell_size
+            total_height = grid_size * cell_size
+
+            # Math: Find the absolute center of the user's specific monitor, 
+            # then subtract half the grid's width/height to find the top-left starting anchor.
+            start_x = (self.width - total_width) // 2
+            start_y = (self.height - total_height) // 2
+
+            # Create a pool of random letters (A-Z), making sure 'Q' is removed from the random pool
+            allowed_chars = list(string.ascii_uppercase.replace(self.target_character, ""))
+
+            for row in range(grid_size):
+                for col in range(grid_size):
+                    # Calculate the exact pixel center for this specific cell
+                    center_x = start_x + (col * cell_size) + (cell_size // 2)
+                    center_y = start_y + (row * cell_size) + (cell_size // 2)
+
+                    # 10% chance to spawn our target 'Q', otherwise pick a random letter
+                    if random.random() < 0.10:
+                        char = self.target_character
+                        color = (255, 255, 255) # White
+                    else:
+                        char = random.choice(allowed_chars)
+                        color = (200, 200, 200) # Slightly dimmed white for distractor letters
+
+                    #  Render the text into an image surface NOW, 
+                    # so the 60Hz loop only has to paste a picture, not render a font.
+                    char_img = self.font.render(char, True, color)
+                    char_rect = char_img.get_rect(center=(center_x, center_y))
+
+                    # Store the fully prepared package in memory
+                    self.search_grid.append({
+                        "img": char_img,
+                        "rect": char_rect,
+                        "char": char
+                    })
 
     def run(self):
         """
@@ -134,6 +187,7 @@ class CognitiveStimulusApp:
                 if time_in_state >= 10.0:
                     self.current_state = 4 
                     self.state_start_time = time.time()
+                    self._generate_task_grid() # Generate the memory grid exactly once before starting
                     print("Transitioned to STATE 4: Task Active")
             
             #  TELEMETRY LOGGING 
@@ -145,7 +199,7 @@ class CognitiveStimulusApp:
             elif self.current_state == 3:
                 calib_flag = "INSTRUCTION" if time_in_state < 5.0 else "MAX_FLEX"
             elif self.current_state == 4:
-                calib_flag = "RUNNING"
+                calib_flag = "INSTRUCTION" if time_in_state < 5.0 else "RUNNING"
             else:
                 calib_flag = "MENU"
 
@@ -165,7 +219,7 @@ class CognitiveStimulusApp:
             self.log_file.flush()
 
             
-            #  VISUAL RENDERING (The Canvas Paint)
+            #  VISUAL RENDERING
             
             # Wipe the frame clean with a dark, non-fatiguing gray (RGB: 30, 30, 30)
             self.screen.fill((30, 30, 30))  # wipes the screen clean before drawing
@@ -174,7 +228,7 @@ class CognitiveStimulusApp:
             
             #  STATE 0 RENDERING: The Welcome Menu 
             if self.current_state == 0:
-                title_img = self.font.render("GOLDEN HYBRID: COGNITIVE LOAD ASSESSMENT", True, (0, 255, 255))
+                title_img = self.font.render("COGNITIVE LOAD ASSESSMENT", True, (0, 255, 255))
                 sub_img = self.font.render("Press SPACEBAR to begin...", True, (255, 255, 255))
                 self.screen.blit(title_img, title_img.get_rect(center=(self.width // 2, self.height // 2 - 30)))
                 self.screen.blit(sub_img, sub_img.get_rect(center=(self.width // 2, self.height // 2 + 30)))
@@ -257,7 +311,24 @@ class CognitiveStimulusApp:
                     #  Blit (stamp) the images onto the screen
                     self.screen.blit(prompt_img, prompt_rect)
                     self.screen.blit(timer_img, timer_rect)
-
+                    
+            # --- STATE 4 RENDERING: The Visual Search Task ---
+            elif self.current_state == 4:
+                if time_in_state < 5.0:
+                    # --- State 4: 5-Second Instruction Phase ---
+                    title_img = self.font.render("PHASE 4: VISUAL SEARCH", True, (0, 255, 255))
+                    sub_img = self.font.render(f"Scan the grid and count how many times '{self.target_character}' appears.", True, (255, 255, 255))
+                    timer_img = self.font.render(f"Starting in {5 - int(time_in_state)}...", True, (150, 150, 150))
+                    
+                    self.screen.blit(title_img, title_img.get_rect(center=(self.width // 2, self.height // 2 - 50)))
+                    self.screen.blit(sub_img, sub_img.get_rect(center=(self.width // 2, self.height // 2 + 10)))
+                    self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
+                
+                else:
+                    # --- State 4: Active Task Phase ---
+                    # Instantly stamp all 25 letters onto the screen using our pre-calculated memory
+                    for cell in self.search_grid:
+                        self.screen.blit(cell["img"], cell["rect"])
             
             #  HARDWARE FLUSH & FRAME THROTTLE
             # Swap the hidden memory buffer with the physical monitor screen
