@@ -1,118 +1,183 @@
 import pygame
 import time
 import os
+import json
 
 class CognitiveStimulusApp:
     """
-    The main UI and state-management hub.
+     THE UI & STIMULUS HUB (60Hz FRAMEWORK)
     
-    This class handles the 60Hz visual rendering pipeline and tracks the user's 
-    progression through the exact sequence of assessment states. It operates 
-    completely independently from the OpenCV camera engine.
+    Architecture:
+    This application acts as the "Frontend" of the Decoupled Dual-Process Architecture. 
+    It operates on a strict 60Hz loop, completely isolated from the OpenCV camera engine. 
+    
+    Responsibilities:
+    1. Visual Rendering: Draw calibration targets and cognitive tasks at 60 Frames Per Second.
+    2. Finite State Machine (FSM): Strictly control the timeline of the assessment (Menu -> Calibrate -> Task).
+    3. Telemetry Sync: Log every single state change and UI event to a JSONL database 
+       stamped with absolute UNIX epoch milliseconds so the Machine Learning pipeline 
+       can perfectly align this data with the OpenCV 30Hz camera stream later.
+    
     """
     
     def __init__(self):
-        # INITIALIZATION: Engine Boot
-        # pygame.init() compiles all the necessary C-level bindings (audio, video, hardware) 
-        # that Pygame needs to interface with the operating system.
-        pygame.init()
         
-        # Grab the native resolution of whatever monitor the user is currently using
+        #  HARDWARE & DISPLAY INITIALIZATION
+        
+        pygame.init() # Boot all underlying C-level audio/video bindings
+        
+        # Monitor Detection: Dynamically read the user's physical screen size.
+        # This guarantees our screen-percentage math (0.0 to 1.0) works on any laptop or monitor.
         screen_info = pygame.display.Info()
         self.width = screen_info.current_w
         self.height = screen_info.current_h
-        # Note: In Pygame, the origin coordinate (0, 0) is the TOP-LEFT corner of the screen.
         
-        # set_mode() actually asks the OS to open the application window.
+        # Canvas Creation: Launch borderless fullscreen to prevent OS distractions.
+        # Note: Pygame's grid origin (X:0, Y:0) is the absolute TOP-LEFT of the monitor.
         self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.display.set_caption("Golden Hybrid: Cognitive Load Assessment")
         
-        # TIMING & THROTTLING 
-        # The Clock object is crucial. Without it, the while-loop below would run 
-        # as fast as the CPU allows (thousands of times per second), crashing the system.
+        # Throttling: The Clock object mathematically prevents the while-loop below 
+        # from running wild and maxing out the CPU, which would crash the camera engine.
         self.clock = pygame.time.Clock()
-        self.fps = 60 # Strict 60Hz limit to ensure smooth visual pursuit for the user
+        self.fps = 60 
         
-        # FINITE STATE MACHINE VARIABLES 
-        # We use an integer system to lock the application into specific phases.
-        # 0 = STATE_MENU | 1 = STATE_CALIBRATE_WINDOW_EXTREMES | 2 = STATE_RESTING_BASELINE
+        
+        #  FINITE STATE MACHINE (FSM) MEMORY
+        
+        # ID 0 = STATE_MENU (Awaiting start command)
+        # ID 1 = STATE_CALIBRATE_EXTREMES (4-Corner boundary mapping)
+        # ID 2 = STATE_RESTING_BASELINE (TO DO)
         self.current_state = 0  
         
-        # time.time() grabs the absolute operating system epoch time.
-        # This acts as our "stopwatch" to calculate how long we have been in a specific state.
+        # Anchor Time: We record the exact millisecond a state begins to calculate duration.
         self.state_start_time = time.time() 
         
-        print(f"System initialized. Awaiting start command.")
+        # State 1 Variables: Tracking the 4-corner multi-pass calibration loop
+        self.calibration_targets = ["TOP_LEFT", "BOTTOM_RIGHT", "TOP_RIGHT", "BOTTOM_LEFT"]
+        self.current_target_label = "NONE"
+        
+        
+        #  TELEMETRY DATABASE CONNECTION (CROSS-PROCESS SYNC)
+        
+        # We open the log file ONCE during boot and hold it open in 'append' ("a") mode.
+        # If we opened and closed this file 60 times a second inside the loop, 
+        # the Hard Drive I/O bottleneck would instantly destroy our frame rate.
+        log_path = os.path.join("..", "data_logs", "ui_events.jsonl")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True) # Prevent crash if folder is missing
+        self.log_file = open(log_path, "a")
+        
+        print(f"System initialized. Logging to: {log_path}")
 
     def run(self):
         """
-        The core application loop. Every single iteration of this loop represents 
-        one single "frame" (1/60th of a second) in our application.
+        The Infinite Main Loop. Every iteration represents exactly 1/60th of a second.
+        Pipeline order strictly follows: Input -> Math -> Database -> Render -> Wait.
         """
         running = True
         
         while running:
             
-            #  EVENT PROCESSING
+            #  EVENT PROCESSING (Hardware Listeners)
             
-            # event.get() pulls a list of everything the user did with their mouse/keyboard 
-            # since the exact last frame. We must empty this queue every frame, or the app freezes.
+            # event.get() clears the OS input buffer. Failure to call this freezes the app.
             for event in pygame.event.get():
                 
-                # Intercept the OS 'close window' 'X' button to shut down safely
-                if event.type == pygame.QUIT:
+                # Safety Valve: Allow ESC key to break the infinite loop in Fullscreen mode.
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                     running = False 
                     
-                # Listen for specific keydown triggers
+                # State 0 -> 1 Transition: Press SPACEBAR to begin the experiment.
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    # Only allow transition to State 1 if we are currently sitting in State 0
                     if self.current_state == 0:
                         self.current_state = 1
-                        self.state_start_time = time.time() # Reset the stopwatch for the new state
+                        self.state_start_time = time.time() # Reset stopwatch for State 1
                         print("Transitioned to STATE 1: Calibrating Extremes")
 
             
-            #  LOGIC & STATE UPDATES
+            #  LOGIC & STATE UPDATES (The FSM Brain)
             
-            # Calculate 'Delta Time': The exact physical time that has passed 
-            # since we entered the current state.
+            # Calculate exactly how many seconds have passed since the current state began.
             current_time = time.time()
             time_in_state = current_time - self.state_start_time 
             
-            # FSM Rule for State 1: 
-            # If we are in State 1 AND exactly 8.0 seconds have elapsed, automatically move forward.
-            if self.current_state == 1 and time_in_state >= 8.0:
-                self.current_state = 2
-                self.state_start_time = time.time() # Reset the stopwatch for State 2
-                print("Transitioned to STATE 2: Resting Baseline")
+            # --- STATE 1 ALGORITHM: The 4-Corner Calibration ---
+            if self.current_state == 1:
+                # The state lasts exactly 8.0 seconds total.
+                if time_in_state >= 8.0:
+                    self.current_state = 2 # Advance to next state
+                    self.current_target_label = "NONE"
+                    self.state_start_time = time.time() # Reset stopwatch for State 2
+                    print("Transitioned to STATE 2: Resting Baseline")
+                else:
+                    # Math Trick: Floor Division (//)
+                    # 0.0s to 1.9s // 2.0 = Index 0 (TOP_LEFT)
+                    # 2.0s to 3.9s // 2.0 = Index 1 (BOTTOM_RIGHT)
+                    # 4.0s to 5.9s // 2.0 = Index 2 (TOP_RIGHT)
+                    # 6.0s to 7.9s // 2.0 = Index 3 (BOTTOM_LEFT)
+                    target_index = int(time_in_state // 2.0)
+                    self.current_target_label = self.calibration_targets[target_index]
 
             
-            #  RENDERING
+            #  TELEMETRY LOGGING 
             
-            # Erase the entire screen from the previous frame by painting it dark gray.
-            # RGB Format: (Red, Green, Blue). (30, 30, 30) is a soft, non-glaring dark background.
+            # Construct the JSON packet matching the Phase 2 Blueprint specifications.
+            log_packet = {
+                "epoch_time_ms": int(current_time * 1000), # UNIX Sync Anchor
+                "state_id": self.current_state,
+                "calibration_flag": self.current_target_label if self.current_state == 1 else ("REST_BASE" if self.current_state == 2 else "MENU"),
+                "task_shift_active": False # Default False, only True during the Shock Event
+            }
+            
+            # Write row to file.
+            self.log_file.write(json.dumps(log_packet) + "\n")
+            
+            # CRITICAL: .flush() forces the OS to physically write the data to the SSD immediately. 
+            # If the app crashes, we don't lose the data sitting in temporary RAM.
+            self.log_file.flush()
+
+            
+            #  VISUAL RENDERING (The Canvas Paint)
+            
+            # Wipe the frame clean with a dark, non-fatiguing gray (RGB: 30, 30, 30)
             self.screen.fill((30, 30, 30)) 
             
-            # Future rendering logic will go here (drawing circles, text, menus)
+            # --- STATE 1 RENDERING: Dynamic Corner Targets ---
+            if self.current_state == 1:
+                radius = 30 # Pixel size of the target
+                color = (0, 255, 0) # High-visibility Neon Green
+                
+                # Math: To keep the circle fully on-screen, we offset the center coordinate
+                # inward by exactly the length of the radius.
+                if self.current_target_label == "TOP_LEFT":
+                    target_pos = (radius, radius)
+                elif self.current_target_label == "BOTTOM_RIGHT":
+                    target_pos = (self.width - radius, self.height - radius)
+                elif self.current_target_label == "TOP_RIGHT":
+                    target_pos = (self.width - radius, radius)
+                elif self.current_target_label == "BOTTOM_LEFT":
+                    target_pos = (radius, self.height - radius)
+                
+                # Draw outer green boundary and an inner red dot to force precise pupil fixation
+                pygame.draw.circle(self.screen, color, target_pos, radius)
+                pygame.draw.circle(self.screen, (255, 0, 0), target_pos, 5) 
 
             
             #  HARDWARE FLUSH & FRAME THROTTLE
             
-            # Pygame uses "Double Buffering". We do all our drawing on a hidden screen in memory.
-            # display.flip() instantly swaps the hidden screen with the visible monitor screen.
+            # Swap the hidden memory buffer with the physical monitor screen
             pygame.display.flip()
             
-            # This line pauses the entire Python script for just a few milliseconds.
-            # It mathematically ensures the loop never cycles faster than 60 times per second.
+            # Pause the script for ~16 milliseconds to strictly lock the loop at 60 FPS
             self.clock.tick(self.fps) 
 
-        # SYSTEM SHUTDOWN 
-        # This code only executes once the `running = True` loop is broken.
-        pygame.quit()
+        
+        # SYSTEM SHUTDOWN (Triggers when 'running = False')
+        
+        self.log_file.close() # Safely sever the database connection
+        pygame.quit() # Unload C-level bindings
         print("Application closed safely.")
 
-
-# Standard execution block: Only run the app if this specific file is executed directly.
 if __name__ == "__main__":
     app = CognitiveStimulusApp()
     app.run()
