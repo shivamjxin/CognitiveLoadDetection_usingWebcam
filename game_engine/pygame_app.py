@@ -34,7 +34,7 @@ class CognitiveStimulusApp:
         
         # Canvas Creation: Launch borderless fullscreen to prevent OS distractions.
         # Note: Pygame's grid origin (X:0, Y:0) is the absolute TOP-LEFT of the monitor.
-        self.screen = pygame.display.set_mode((self.width, self.height))
+        self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
         pygame.display.set_caption("Golden Hybrid: Cognitive Load Assessment")
         
         # Throttling: The Clock object mathematically prevents the while-loop below 
@@ -78,8 +78,7 @@ class CognitiveStimulusApp:
         
         while running:
             
-            #  EVENT PROCESSING (Hardware Listeners)
-            
+            #  EVENT PROCESSING 
             # event.get() clears the OS input buffer. Failure to call this freezes the app.
             for event in pygame.event.get():
                 
@@ -95,13 +94,12 @@ class CognitiveStimulusApp:
                         print("Transitioned to STATE 1: Calibrating Extremes")
 
             
-            #  LOGIC & STATE UPDATES (The FSM Brain)
-            
+            #  LOGIC & STATE UPDATES i.e FSM
             # Calculate exactly how many seconds have passed since the current state began.
             current_time = time.time()
             time_in_state = current_time - self.state_start_time 
             
-            # --- STATE 1 ALGORITHM: The 4-Corner Calibration ---
+            # STATE 1 ALGORITHM (4-Corner Calibration)
             if self.current_state == 1:
                 # The state lasts exactly 8.0 seconds total.
                 if time_in_state >= 8.0:
@@ -110,7 +108,6 @@ class CognitiveStimulusApp:
                     self.state_start_time = time.time() # Reset stopwatch for State 2
                     print("Transitioned to STATE 2: Resting Baseline")
                 else:
-                    # Math Trick: Floor Division (//)
                     # 0.0s to 1.9s // 2.0 = Index 0 (TOP_LEFT)
                     # 2.0s to 3.9s // 2.0 = Index 1 (BOTTOM_RIGHT)
                     # 4.0s to 5.9s // 2.0 = Index 2 (TOP_RIGHT)
@@ -118,9 +115,14 @@ class CognitiveStimulusApp:
                     target_index = int(time_in_state // 2.0)
                     self.current_target_label = self.calibration_targets[target_index]
 
+            #  STATE 2 ALGORITHM: 15-Second Resting Baseline
+            elif self.current_state == 2:
+                if time_in_state >= 15.0:
+                    self.current_state = 3 
+                    self.state_start_time = time.time()
+                    print("Transitioned to STATE 3: Max Flex")
             
             #  TELEMETRY LOGGING 
-            
             # Construct the JSON packet matching the Phase 2 Blueprint specifications.
             log_packet = {
                 "epoch_time_ms": int(current_time * 1000), # UNIX Sync Anchor
@@ -140,14 +142,14 @@ class CognitiveStimulusApp:
             #  VISUAL RENDERING (The Canvas Paint)
             
             # Wipe the frame clean with a dark, non-fatiguing gray (RGB: 30, 30, 30)
-            self.screen.fill((30, 30, 30)) 
+            self.screen.fill((30, 30, 30))  # wipes the screen clean before drawing
+            radius = 30 # Pixel size of the target
+            color = (0, 255, 0) # High-visibility Neon Green 
             
-            # --- STATE 1 RENDERING: Dynamic Corner Targets ---
+            #  STATE 1 RENDERING: Dynamic Corner Targets 
             if self.current_state == 1:
-                radius = 30 # Pixel size of the target
-                color = (0, 255, 0) # High-visibility Neon Green
                 
-                # Math: To keep the circle fully on-screen, we offset the center coordinate
+                # To keep the circle fully on-screen, we offset the center coordinate
                 # inward by exactly the length of the radius.
                 if self.current_target_label == "TOP_LEFT":
                     target_pos = (radius, radius)
@@ -157,14 +159,22 @@ class CognitiveStimulusApp:
                     target_pos = (self.width - radius, radius)
                 elif self.current_target_label == "BOTTOM_LEFT":
                     target_pos = (radius, self.height - radius)
-                
-                # Draw outer green boundary and an inner red dot to force precise pupil fixation
+
                 pygame.draw.circle(self.screen, color, target_pos, radius)
-                pygame.draw.circle(self.screen, (255, 0, 0), target_pos, 5) 
+                pygame.draw.circle(self.screen, (255, 0, 0), target_pos, 5)
+
+            elif self.current_state == 2:
+                # Calculate Dead-Center Coordinates
+                center_x = self.width // 2
+                center_y = self.height // 2
+                target_pos = (center_x, center_y)
+                
+                # Paint State 2 Targets
+                pygame.draw.circle(self.screen, color, target_pos, radius)
+                pygame.draw.circle(self.screen, (255, 0, 0), target_pos, 5)
 
             
             #  HARDWARE FLUSH & FRAME THROTTLE
-            
             # Swap the hidden memory buffer with the physical monitor screen
             pygame.display.flip()
             
@@ -172,8 +182,7 @@ class CognitiveStimulusApp:
             self.clock.tick(self.fps) 
 
         
-        # SYSTEM SHUTDOWN (Triggers when 'running = False')
-        
+        # SYSTEM SHUTDOWN 
         self.log_file.close() # Safely sever the database connection
         pygame.quit() # Unload C-level bindings
         print("Application closed safely.")
