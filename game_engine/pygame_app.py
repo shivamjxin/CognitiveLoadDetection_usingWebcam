@@ -4,6 +4,7 @@ import os
 import json
 import random
 import string
+from pylsl import StreamInfo, StreamOutlet
 
 class CognitiveStimulusApp:
     """
@@ -64,9 +65,7 @@ class CognitiveStimulusApp:
             self.search_grid = [] # Will hold the pre-calculated 5x5 board
             self.target_character = "Q" # The specific item the user is hunting for
 
-            # ============================================================
             # STATE 4: TASK SHIFT SHOCK ENGINE
-            # ============================================================
 
             # Random trigger point (generated once when State 4 starts)
             self.shock_trigger_time = None
@@ -76,7 +75,7 @@ class CognitiveStimulusApp:
             self.shock_completed = False
 
             # Override challenge
-            self.safety_code = "X7B2"
+            self.safety_code = "67FSM2169L"
             self.override_input = ""
 
             # Performance metrics
@@ -89,15 +88,24 @@ class CognitiveStimulusApp:
             self.memory_answer = ""
             self.memory_score = 0
 
-            #  TELEMETRY DATABASE CONNECTION (CROSS-PROCESS SYNC)
-            # We open the log file ONCE during boot and hold it open in 'append' ("a") mode.
-            # If we opened and closed this file 60 times a second inside the loop, 
-            # the Hard Drive I/O bottleneck would instantly destroy our frame rate.
-            log_path = os.path.join("..", "data_logs", "ui_events.jsonl")
-            os.makedirs(os.path.dirname(log_path), exist_ok=True) # Prevent crash if folder is missing
-            self.log_file = open(log_path, "a")
+            #  EVENT GATE MEMORY (Prevents 60Hz LSL Spam)
+            self.previous_state = -1
+            self.previous_calib_flag = ""
+            self.previous_shock_active = False
+
+            #  LSL TELEMETRY CONNECTION (CROSS-PROCESS SYNC)
+            print("Initializing UI LSL Stream...")
+            ui_info = StreamInfo(
+                'PygameGameEvents', 
+                'Markers', 
+                1,                     # 1 channel for a single string payload
+                0,                     # 0 signifies event-driven/irregular sampling
+                'string', 
+                'mit_game_engine_002'
+            )
+            self.ui_outlet = StreamOutlet(ui_info)
             
-            print(f"System initialized. Logging to: {log_path}")
+            print("System initialized. UI Event Marker Stream Online.")
 
     def _generate_task_grid(self):
         """
@@ -192,6 +200,7 @@ class CognitiveStimulusApp:
 
                         else:
                             self.override_input += event.unicode.upper()
+
                     if self.current_state == 5 and event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_a:
                            self.memory_answer = "A"
@@ -203,8 +212,8 @@ class CognitiveStimulusApp:
                            self.memory_answer = "D"
                         if self.memory_answer == "A":
                            self.memory_score = 1
-                        self.current_state = 6
 
+                        self.current_state = 6
                         print(f"Memory answer: {self.memory_answer}")
 
                     
@@ -219,10 +228,6 @@ class CognitiveStimulusApp:
                             self.current_state = 1
                             self.state_start_time = time.time() # Reset stopwatch for State 1
                             print("Transitioned to STATE 1: Calibrating Extremes")
-
-                            
-
-
                 
                 #  LOGIC & STATE UPDATES i.e FSM
                 # Calculate exactly how many seconds have passed since the current state began.
@@ -317,9 +322,9 @@ class CognitiveStimulusApp:
                 else:
                     calib_flag = "MENU"
 
-                # Construct the JSON packet matching the Phase 2 Blueprint specifications.
+                #  LSL EVENT GATE
+                # Construct the JSON packet (the epoch time handled by LSL natively)
                 log_packet = {
-                    "epoch_time_ms": int(current_time * 1000),
                     "state_id": self.current_state,
                     "calibration_flag": calib_flag,
                     "task_shift_active": self.shock_active,
@@ -329,13 +334,17 @@ class CognitiveStimulusApp:
                     "memory_score": self.memory_score
                 }
                 
-                # Write row to file.
-                self.log_file.write(json.dumps(log_packet) + "\n")
-                
-                # CRITICAL: .flush() forces the OS to physically write the data to the SSD immediately. 
-                # If the app crashes, we don't lose the data sitting in temporary RAM.
-                self.log_file.flush()
-
+                # Only push to LSL if a variable actually changed
+                if (self.current_state != self.previous_state or 
+                    calib_flag != self.previous_calib_flag or 
+                    self.shock_active != self.previous_shock_active):
+                    
+                    self.ui_outlet.push_sample([json.dumps(log_packet)])
+                    
+                    # Update memory block
+                    self.previous_state = self.current_state
+                    self.previous_calib_flag = calib_flag
+                    self.previous_shock_active = self.shock_active
                 
                 #  VISUAL RENDERING
                 
@@ -622,7 +631,6 @@ class CognitiveStimulusApp:
                 self.clock.tick(self.fps)
             
             # SYSTEM SHUTDOWN 
-            self.log_file.close() # Safely sever the database connection
             pygame.quit() # Unload C-level bindings
             print("Application closed safely.")
 
