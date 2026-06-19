@@ -32,14 +32,19 @@ class CognitiveStimulusApp:
             # Monitor Detection: Dynamically read the user's physical screen size.
             # This guarantees our screen-percentage math (0.0 to 1.0) works on any laptop or monitor.
             screen_info = pygame.display.Info()
-            self.width = screen_info.current_w
-            self.height = screen_info.current_h
+            self.native_width = screen_info.current_w
+            self.native_height = screen_info.current_h
             self.font = pygame.font.SysFont(None, 48)
 
-            # Canvas Creation: Launch borderless fullscreen to prevent OS distractions.
+            
             # Note: Pygame's grid origin (X:0, Y:0) is the absolute TOP-LEFT of the monitor.
-            self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
+            # Boot into a movable window to be able to access LabRecorder
+            self.screen = pygame.display.set_mode((800, 600))
             pygame.display.set_caption("Cognitive Load Assessment")
+
+            # Set active dimensions to match the window so State 0 centers perfectly
+            self.width = 800
+            self.height = 600
             
             # Throttling: The Clock object mathematically prevents the while-loop below 
             # from running wild and maxing out the CPU, which would crash the camera engine.
@@ -227,6 +232,11 @@ class CognitiveStimulusApp:
                         if self.current_state == 0:
                             self.current_state = 1
                             self.state_start_time = time.time() # Reset stopwatch for State 1
+                            self.screen = pygame.display.set_mode((self.native_width, self.native_height), pygame.FULLSCREEN)   # move to fullscreen on pressing SPACE
+
+                            #nupdate active dimensions so the rest of the states center perfectly
+                            self.width = self.native_width
+                            self.height = self.native_height
                             print("Transitioned to STATE 1: Calibrating Extremes")
                 
                 #  LOGIC & STATE UPDATES i.e FSM
