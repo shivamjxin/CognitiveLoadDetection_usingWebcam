@@ -4,7 +4,7 @@ import os
 import json
 import random
 import string
-import sys # Added to send OS-level termination signal to launcher.py
+import sys
 from pylsl import StreamInfo, StreamOutlet
 
 class CognitiveStimulusApp:
