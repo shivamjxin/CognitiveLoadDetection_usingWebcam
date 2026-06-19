@@ -174,7 +174,7 @@ class CognitiveStimulusApp:
                 # event.get() clears the OS input buffer. Failure to call this freezes the app.
                 for event in pygame.event.get():
                     if self.shock_active and event.type == pygame.KEYDOWN:
-                        print("KEY DETECTED")
+                        # print("KEY DETECTED")   # commented out the line to prevent terminal flooding
 
                         if event.key == pygame.K_BACKSPACE:
 
@@ -304,7 +304,7 @@ class CognitiveStimulusApp:
                     ):
 
                         self.shock_active = True
-                        print("shock_active =", self.shock_active)
+                        #print("shock_active =", self.shock_active)  # commented out the line to prevent terminal flooding
 
                         self.shock_start_ms = int(time.time() * 1000)
 
@@ -462,7 +462,7 @@ class CognitiveStimulusApp:
                         self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
                     
                     elif self.shock_active:
-                         print("RENDERING SHOCK SCREEN", self.shock_active)
+                         #print("RENDERING SHOCK SCREEN", self.shock_active)  # commented out the line to stop terminal flooding
                          # ==================================================
                          # RED ALERT SCREEN
                          # ==================================================
