@@ -3,3 +3,4 @@ data_logs/*.jsonl
 __pycache__/
 *.pyc
 local_config.json
+data_logs/sub-P001
