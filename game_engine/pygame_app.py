@@ -4,6 +4,8 @@ import os
 import json
 import random
 import string
+import sys
+from pylsl import StreamInfo, StreamOutlet
 
 class CognitiveStimulusApp:
     """
@@ -31,14 +33,19 @@ class CognitiveStimulusApp:
             # Monitor Detection: Dynamically read the user's physical screen size.
             # This guarantees our screen-percentage math (0.0 to 1.0) works on any laptop or monitor.
             screen_info = pygame.display.Info()
-            self.width = screen_info.current_w
-            self.height = screen_info.current_h
+            self.native_width = screen_info.current_w
+            self.native_height = screen_info.current_h
             self.font = pygame.font.SysFont(None, 48)
 
-            # Canvas Creation: Launch borderless fullscreen to prevent OS distractions.
+            
             # Note: Pygame's grid origin (X:0, Y:0) is the absolute TOP-LEFT of the monitor.
-            self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
+            # Boot into a movable window to be able to access LabRecorder
+            self.screen = pygame.display.set_mode((800, 600))
             pygame.display.set_caption("Cognitive Load Assessment")
+
+            # Set active dimensions to match the window so State 0 centers perfectly
+            self.width = 800
+            self.height = 600
             
             # Throttling: The Clock object mathematically prevents the while-loop below 
             # from running wild and maxing out the CPU, which would crash the camera engine.
@@ -64,9 +71,7 @@ class CognitiveStimulusApp:
             self.search_grid = [] # Will hold the pre-calculated 5x5 board
             self.target_character = "Q" # The specific item the user is hunting for
 
-            # ============================================================
             # STATE 4: TASK SHIFT SHOCK ENGINE
-            # ============================================================
 
             # Random trigger point (generated once when State 4 starts)
             self.shock_trigger_time = None
@@ -76,7 +81,7 @@ class CognitiveStimulusApp:
             self.shock_completed = False
 
             # Override challenge
-            self.safety_code = "X7B2"
+            self.safety_code = "67FSM2169L"
             self.override_input = ""
 
             # Performance metrics
@@ -89,15 +94,25 @@ class CognitiveStimulusApp:
             self.memory_answer = ""
             self.memory_score = 0
 
-            #  TELEMETRY DATABASE CONNECTION (CROSS-PROCESS SYNC)
-            # We open the log file ONCE during boot and hold it open in 'append' ("a") mode.
-            # If we opened and closed this file 60 times a second inside the loop, 
-            # the Hard Drive I/O bottleneck would instantly destroy our frame rate.
-            log_path = os.path.join("..", "data_logs", "ui_events.jsonl")
-            os.makedirs(os.path.dirname(log_path), exist_ok=True) # Prevent crash if folder is missing
-            self.log_file = open(log_path, "a")
+            #  EVENT GATE MEMORY (Prevents 60Hz LSL Spam)
+            self.previous_state = -1
+            self.previous_calib_flag = ""
+            self.previous_shock_active = False
+            self.previous_override_errors = 0 # Added memory tracker for granular typo logging
+
+            #  LSL TELEMETRY CONNECTION (CROSS-PROCESS SYNC)
+            print("Initializing UI LSL Stream...")
+            ui_info = StreamInfo(
+                'PygameGameEvents', 
+                'Markers', 
+                1,                     # 1 channel for a single string payload
+                0,                     # 0 signifies event-driven/irregular sampling
+                'string', 
+                'mit_game_engine_002'
+            )
+            self.ui_outlet = StreamOutlet(ui_info)
             
-            print(f"System initialized. Logging to: {log_path}")
+            print("System initialized. UI Event Marker Stream Online.")
 
     def _generate_task_grid(self):
         """
@@ -161,7 +176,6 @@ class CognitiveStimulusApp:
                 # event.get() clears the OS input buffer. Failure to call this freezes the app.
                 for event in pygame.event.get():
                     if self.shock_active and event.type == pygame.KEYDOWN:
-                        print("KEY DETECTED")
 
                         if event.key == pygame.K_BACKSPACE:
 
@@ -192,6 +206,7 @@ class CognitiveStimulusApp:
 
                         else:
                             self.override_input += event.unicode.upper()
+
                     if self.current_state == 5 and event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_a:
                            self.memory_answer = "A"
@@ -201,11 +216,15 @@ class CognitiveStimulusApp:
                            self.memory_answer = "C"
                         elif event.key == pygame.K_d:
                            self.memory_answer = "D"
-                        if self.memory_answer == "A":
-                           self.memory_score = 1
-                        self.current_state = 6
-
-                        print(f"Memory answer: {self.memory_answer}")
+                           
+                        # Gate logic to ensure only valid A/B/C/D keypresses trigger the transition
+                        if event.key in [pygame.K_a, pygame.K_b, pygame.K_c, pygame.K_d]:
+                            if self.memory_answer == "A":
+                               self.memory_score = 1
+                               
+                            self.current_state = 6
+                            self.state_start_time = time.time() # Reset stopwatch for State 6 auto-close
+                            print(f"Memory answer: {self.memory_answer}")
 
                     
                     
@@ -218,11 +237,12 @@ class CognitiveStimulusApp:
                         if self.current_state == 0:
                             self.current_state = 1
                             self.state_start_time = time.time() # Reset stopwatch for State 1
+                            self.screen = pygame.display.set_mode((self.native_width, self.native_height), pygame.FULLSCREEN)   # move to fullscreen on pressing SPACE
+
+                            # update active dimensions so the rest of the states center perfectly
+                            self.width = self.native_width
+                            self.height = self.native_height
                             print("Transitioned to STATE 1: Calibrating Extremes")
-
-                            
-
-
                 
                 #  LOGIC & STATE UPDATES i.e FSM
                 # Calculate exactly how many seconds have passed since the current state began.
@@ -289,7 +309,6 @@ class CognitiveStimulusApp:
                     ):
 
                         self.shock_active = True
-                        print("shock_active =", self.shock_active)
 
                         self.shock_start_ms = int(time.time() * 1000)
 
@@ -305,6 +324,13 @@ class CognitiveStimulusApp:
                         self.state_start_time = time.time()
                         print("Transitioned to STATE 5: Memory Recall")
 
+                # STATE 6 ALGORITHM: Auto-Shutdown
+                elif self.current_state == 6:
+                    # Display the final score for 3 seconds, then cleanly exit
+                    if time_in_state >= 3.0:
+                        print("Assessment complete. Initiating auto-shutdown...")
+                        running = False
+
                 # Determine the correct flag string based on state
                 if self.current_state == 1:
                     calib_flag = self.current_target_label # Will be "INSTRUCTION" for first 5s
@@ -317,9 +343,9 @@ class CognitiveStimulusApp:
                 else:
                     calib_flag = "MENU"
 
-                # Construct the JSON packet matching the Phase 2 Blueprint specifications.
+                #  LSL EVENT GATE
+                # Construct the JSON packet (the epoch time handled by LSL natively)
                 log_packet = {
-                    "epoch_time_ms": int(current_time * 1000),
                     "state_id": self.current_state,
                     "calibration_flag": calib_flag,
                     "task_shift_active": self.shock_active,
@@ -329,13 +355,19 @@ class CognitiveStimulusApp:
                     "memory_score": self.memory_score
                 }
                 
-                # Write row to file.
-                self.log_file.write(json.dumps(log_packet) + "\n")
-                
-                # CRITICAL: .flush() forces the OS to physically write the data to the SSD immediately. 
-                # If the app crashes, we don't lose the data sitting in temporary RAM.
-                self.log_file.flush()
-
+                # Added override_errors to the event gate so LSL pushes a timestamp the exact millisecond a typo occurs
+                if (self.current_state != self.previous_state or 
+                    calib_flag != self.previous_calib_flag or 
+                    self.shock_active != self.previous_shock_active or
+                    self.override_errors != self.previous_override_errors):
+                    
+                    self.ui_outlet.push_sample([json.dumps(log_packet)])
+                    
+                    # Update memory block
+                    self.previous_state = self.current_state
+                    self.previous_calib_flag = calib_flag
+                    self.previous_shock_active = self.shock_active
+                    self.previous_override_errors = self.override_errors
                 
                 #  VISUAL RENDERING
                 
@@ -443,7 +475,6 @@ class CognitiveStimulusApp:
                         self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
                     
                     elif self.shock_active:
-                         print("RENDERING SHOCK SCREEN", self.shock_active)
                          # ==================================================
                          # RED ALERT SCREEN
                          # ==================================================
@@ -552,36 +583,37 @@ class CognitiveStimulusApp:
                         (255,255,255)
                     )
 
-
+                    # Use dynamic center offsets instead of hardcoded vertical pixels
+                    center_y = self.height // 2
+                    
                     self.screen.blit(
                         title_img,
-                        title_img.get_rect(center=(self.width//2,150))
+                        title_img.get_rect(center=(self.width//2, center_y - 200))
                     )
-
 
                     self.screen.blit(
                         q_img,
-                        q_img.get_rect(center=(self.width//2,250))
+                        q_img.get_rect(center=(self.width//2, center_y - 100))
                     )
 
                     self.screen.blit(
                         a_img,
-                        a_img.get_rect(center=(self.width//2,350))
+                        a_img.get_rect(center=(self.width//2, center_y))
                     )
 
                     self.screen.blit(
                         b_img,
-                        b_img.get_rect(center=(self.width//2,420))
+                        b_img.get_rect(center=(self.width//2, center_y + 70))
                     )
 
                     self.screen.blit(
                         c_img,
-                        c_img.get_rect(center=(self.width//2,490))
+                        c_img.get_rect(center=(self.width//2, center_y + 140))
                     )
 
                     self.screen.blit(
                         d_img,
-                        d_img.get_rect(center=(self.width//2,560))
+                        d_img.get_rect(center=(self.width//2, center_y + 210))
                     )
                 
                 #  STATE 6 RENDERING: Assessment Complete
@@ -622,9 +654,9 @@ class CognitiveStimulusApp:
                 self.clock.tick(self.fps)
             
             # SYSTEM SHUTDOWN 
-            self.log_file.close() # Safely sever the database connection
             pygame.quit() # Unload C-level bindings
             print("Application closed safely.")
+            sys.exit(0) # Explicitly tell the OS this process is dead so launcher.py shuts everything down instantly
 
 if __name__ == "__main__":
     app = CognitiveStimulusApp()
