@@ -97,6 +97,7 @@ class CognitiveStimulusApp:
             self.previous_state = -1
             self.previous_calib_flag = ""
             self.previous_shock_active = False
+            self.previous_override_errors = 0 # FIX: Added memory tracker for granular typo logging
 
             #  LSL TELEMETRY CONNECTION (CROSS-PROCESS SYNC)
             print("Initializing UI LSL Stream...")
@@ -215,11 +216,14 @@ class CognitiveStimulusApp:
                            self.memory_answer = "C"
                         elif event.key == pygame.K_d:
                            self.memory_answer = "D"
-                        if self.memory_answer == "A":
-                           self.memory_score = 1
-
-                        self.current_state = 6
-                        print(f"Memory answer: {self.memory_answer}")
+                           
+                        # Gate logic to ensure only valid A/B/C/D keypresses trigger the transition
+                        if event.key in [pygame.K_a, pygame.K_b, pygame.K_c, pygame.K_d]:
+                            if self.memory_answer == "A":
+                               self.memory_score = 1
+                               
+                            self.current_state = 6
+                            print(f"Memory answer: {self.memory_answer}")
 
                     
                     
@@ -234,7 +238,7 @@ class CognitiveStimulusApp:
                             self.state_start_time = time.time() # Reset stopwatch for State 1
                             self.screen = pygame.display.set_mode((self.native_width, self.native_height), pygame.FULLSCREEN)   # move to fullscreen on pressing SPACE
 
-                            #nupdate active dimensions so the rest of the states center perfectly
+                            # update active dimensions so the rest of the states center perfectly
                             self.width = self.native_width
                             self.height = self.native_height
                             print("Transitioned to STATE 1: Calibrating Extremes")
@@ -344,10 +348,11 @@ class CognitiveStimulusApp:
                     "memory_score": self.memory_score
                 }
                 
-                # Only push to LSL if a variable actually changed
+                # FIX: Added override_errors to the event gate so LSL pushes a timestamp the exact millisecond a typo occurs
                 if (self.current_state != self.previous_state or 
                     calib_flag != self.previous_calib_flag or 
-                    self.shock_active != self.previous_shock_active):
+                    self.shock_active != self.previous_shock_active or
+                    self.override_errors != self.previous_override_errors):
                     
                     self.ui_outlet.push_sample([json.dumps(log_packet)])
                     
@@ -355,6 +360,7 @@ class CognitiveStimulusApp:
                     self.previous_state = self.current_state
                     self.previous_calib_flag = calib_flag
                     self.previous_shock_active = self.shock_active
+                    self.previous_override_errors = self.override_errors
                 
                 #  VISUAL RENDERING
                 
@@ -571,36 +577,37 @@ class CognitiveStimulusApp:
                         (255,255,255)
                     )
 
-
+                    # Use dynamic center offsets instead of hardcoded vertical pixels
+                    center_y = self.height // 2
+                    
                     self.screen.blit(
                         title_img,
-                        title_img.get_rect(center=(self.width//2,150))
+                        title_img.get_rect(center=(self.width//2, center_y - 200))
                     )
-
 
                     self.screen.blit(
                         q_img,
-                        q_img.get_rect(center=(self.width//2,250))
+                        q_img.get_rect(center=(self.width//2, center_y - 100))
                     )
 
                     self.screen.blit(
                         a_img,
-                        a_img.get_rect(center=(self.width//2,350))
+                        a_img.get_rect(center=(self.width//2, center_y))
                     )
 
                     self.screen.blit(
                         b_img,
-                        b_img.get_rect(center=(self.width//2,420))
+                        b_img.get_rect(center=(self.width//2, center_y + 70))
                     )
 
                     self.screen.blit(
                         c_img,
-                        c_img.get_rect(center=(self.width//2,490))
+                        c_img.get_rect(center=(self.width//2, center_y + 140))
                     )
 
                     self.screen.blit(
                         d_img,
-                        d_img.get_rect(center=(self.width//2,560))
+                        d_img.get_rect(center=(self.width//2, center_y + 210))
                     )
                 
                 #  STATE 6 RENDERING: Assessment Complete
