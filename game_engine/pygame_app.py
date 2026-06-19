@@ -4,6 +4,7 @@ import os
 import json
 import random
 import string
+import sys # Added to send OS-level termination signal to launcher.py
 from pylsl import StreamInfo, StreamOutlet
 
 class CognitiveStimulusApp:
@@ -97,7 +98,7 @@ class CognitiveStimulusApp:
             self.previous_state = -1
             self.previous_calib_flag = ""
             self.previous_shock_active = False
-            self.previous_override_errors = 0 # FIX: Added memory tracker for granular typo logging
+            self.previous_override_errors = 0 # Added memory tracker for granular typo logging
 
             #  LSL TELEMETRY CONNECTION (CROSS-PROCESS SYNC)
             print("Initializing UI LSL Stream...")
@@ -175,7 +176,6 @@ class CognitiveStimulusApp:
                 # event.get() clears the OS input buffer. Failure to call this freezes the app.
                 for event in pygame.event.get():
                     if self.shock_active and event.type == pygame.KEYDOWN:
-                        # print("KEY DETECTED")   # commented out the line to prevent terminal flooding
 
                         if event.key == pygame.K_BACKSPACE:
 
@@ -223,6 +223,7 @@ class CognitiveStimulusApp:
                                self.memory_score = 1
                                
                             self.current_state = 6
+                            self.state_start_time = time.time() # Reset stopwatch for State 6 auto-close
                             print(f"Memory answer: {self.memory_answer}")
 
                     
@@ -308,7 +309,6 @@ class CognitiveStimulusApp:
                     ):
 
                         self.shock_active = True
-                        #print("shock_active =", self.shock_active)  # commented out the line to prevent terminal flooding
 
                         self.shock_start_ms = int(time.time() * 1000)
 
@@ -323,6 +323,13 @@ class CognitiveStimulusApp:
                         self.current_state = 5
                         self.state_start_time = time.time()
                         print("Transitioned to STATE 5: Memory Recall")
+
+                # STATE 6 ALGORITHM: Auto-Shutdown
+                elif self.current_state == 6:
+                    # Display the final score for 3 seconds, then cleanly exit
+                    if time_in_state >= 3.0:
+                        print("Assessment complete. Initiating auto-shutdown...")
+                        running = False
 
                 # Determine the correct flag string based on state
                 if self.current_state == 1:
@@ -348,7 +355,7 @@ class CognitiveStimulusApp:
                     "memory_score": self.memory_score
                 }
                 
-                # FIX: Added override_errors to the event gate so LSL pushes a timestamp the exact millisecond a typo occurs
+                # Added override_errors to the event gate so LSL pushes a timestamp the exact millisecond a typo occurs
                 if (self.current_state != self.previous_state or 
                     calib_flag != self.previous_calib_flag or 
                     self.shock_active != self.previous_shock_active or
@@ -468,7 +475,6 @@ class CognitiveStimulusApp:
                         self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
                     
                     elif self.shock_active:
-                         #print("RENDERING SHOCK SCREEN", self.shock_active)  # commented out the line to stop terminal flooding
                          # ==================================================
                          # RED ALERT SCREEN
                          # ==================================================
@@ -650,6 +656,7 @@ class CognitiveStimulusApp:
             # SYSTEM SHUTDOWN 
             pygame.quit() # Unload C-level bindings
             print("Application closed safely.")
+            sys.exit(0) # Explicitly tell the OS this process is dead so launcher.py shuts everything down instantly
 
 if __name__ == "__main__":
     app = CognitiveStimulusApp()
