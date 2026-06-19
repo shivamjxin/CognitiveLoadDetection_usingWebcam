@@ -2,3 +2,4 @@ venv/
 data_logs/*.jsonl
 __pycache__/
 *.pyc
+local_config.json
