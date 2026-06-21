@@ -64,6 +64,34 @@ class CognitiveStimulusApp:
             # State 4 Variables: Task Grid Memory
             self.search_grid = [] # Will hold the pre-calculated 5x5 board
             self.target_character = "Q" # The specific item the user is hunting for
+            # TASK 1 RESULTS
+            self.task1_correct_count = 0
+            self.task1_user_answer = ""
+
+            # TASK 2 RESULTS
+            self.task2_correct_count = 0
+            self.task2_user_answer = ""
+
+            # Current active task
+            self.current_task = 1
+            self.user_count_answer = ""
+            self.count_accuracy = 0
+
+            # Shock display timing
+            self.shock_display_start = None
+
+            # True once the code has been shown
+            self.code_presented = False
+            self.code_flash_done = False
+
+            # MEMORY CODE TASK
+            self.memory_code = ""
+            self.memory_code_options = []
+            self.memory_code_answer = ""
+            self.memory_code_accuracy = 0
+
+            # Generic text input buffer
+            self.user_input = ""
 
             # STATE 4: TASK SHIFT SHOCK ENGINE
 
@@ -74,8 +102,15 @@ class CognitiveStimulusApp:
             self.shock_active = False
             self.shock_completed = False
 
+            self.just_entered_state9 = False
+
             # Override challenge
-            self.safety_code = "67FSM2169L"
+            self.safety_code = ''.join(
+                random.choices(
+                    string.ascii_uppercase + string.digits,
+                    k=4
+                )
+            )
             self.override_input = ""
 
             # Performance metrics
@@ -115,8 +150,12 @@ class CognitiveStimulusApp:
         to prevent math calculations from lagging the 60Hz render loop.
         """
         self.search_grid = [] # Clear any previous memory
-        grid_size = 5
-        cell_size = 100 # 100x100 pixel boundary per letter
+        if self.current_task == 1:
+            grid_size = 5
+            cell_size = 100
+        else:
+            grid_size = 8
+            cell_size = 70
         
         # Total size of the physical grid on screen
         total_width = grid_size * cell_size
@@ -127,8 +166,23 @@ class CognitiveStimulusApp:
         start_x = (self.width - total_width) // 2
         start_y = (self.height - total_height) // 2
 
-        # Create a pool of random letters (A-Z), making sure 'Q' is removed from the random pool
-        allowed_chars = list(string.ascii_uppercase.replace(self.target_character, ""))
+        # Create a pool of random letters (A-Z), making sure the target character is removed from the distractor pool
+        if self.current_task == 1:
+            allowed_chars = list(
+                string.ascii_uppercase.replace(
+                    self.target_character,
+                    ""
+                )
+            )
+        else:
+            allowed_chars = [
+                "Q", "Q", "Q",
+                "C",
+                "D",
+                "G"
+            ]
+
+        self.correct_count = 0
 
         for row in range(grid_size):
             for col in range(grid_size):
@@ -137,9 +191,17 @@ class CognitiveStimulusApp:
                 center_y = start_y + (row * cell_size) + (cell_size // 2)
 
                 # 10% chance to spawn our target 'Q', otherwise pick a random letter
-                if random.random() < 0.10:
+                if self.current_task == 1:
+                    target_probability = 0.10
+                else:
+                    target_probability = 0.18
+
+                if random.random() < target_probability:
                     char = self.target_character
-                    color = (255, 255, 255) # White
+                    color = (255, 255, 255)
+
+                    self.correct_count += 1
+                    
                 else:
                     char = random.choice(allowed_chars)
                     color = (200, 200, 200) # Slightly dimmed white for distractor letters
@@ -202,22 +264,75 @@ class CognitiveStimulusApp:
                             self.override_input += event.unicode.upper()
 
                     if self.current_state == 5 and event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_a:
-                           self.memory_answer = "A"
-                        elif event.key == pygame.K_b:
-                           self.memory_answer = "B"
-                        elif event.key == pygame.K_c:
-                           self.memory_answer = "C"
-                        elif event.key == pygame.K_d:
-                           self.memory_answer = "D"
-                        if self.memory_answer == "A":
-                           self.memory_score = 1
+                        if event.key == pygame.K_BACKSPACE:
+                            self.user_count_answer = self.user_count_answer[:-1]
 
-                        self.current_state = 6
-                        print(f"Memory answer: {self.memory_answer}")
+                        elif event.key == pygame.K_RETURN:
+                            if self.user_count_answer.isdigit():
+                                if int(self.user_count_answer) == self.correct_count:
+                                    self.count_accuracy = 1
+                                else:
+                                    self.count_accuracy = 0
 
-                    
-                    
+                                print(
+                                    f"User Answer = {self.user_count_answer}, "
+                                    f"Correct = {self.correct_count}"
+                                )
+
+                                self.current_state = 6
+
+                        elif event.unicode.isdigit():
+                            self.user_count_answer += event.unicode
+
+                    if self.current_state == 8 and event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_BACKSPACE:
+                            self.task2_user_answer = self.task2_user_answer[:-1]
+
+                        elif event.key == pygame.K_RETURN:
+                            if self.task2_user_answer.isdigit():
+                                if int(self.task2_user_answer) == self.correct_count:
+                                    self.count_accuracy = 1
+                                else:
+                                    self.count_accuracy = 0
+
+                                print(
+                                    f"Task 2 Answer = {self.task2_user_answer}, "
+                                    f"Correct = {self.correct_count}"
+                                )
+
+                                
+                                self.current_state = 9
+                                self.state_start_time = time.time()
+                                self.just_entered_state9 = True
+
+                        elif event.unicode.isdigit():
+                            self.task2_user_answer += event.unicode
+
+                    if self.current_state == 9 and event.type == pygame.KEYDOWN:
+                        if self.just_entered_state9:
+                            self.just_entered_state9 = False
+                            continue
+
+                        if event.key == pygame.K_BACKSPACE:
+                            self.memory_code_answer = self.memory_code_answer[:-1]
+
+                        elif event.key == pygame.K_RETURN:
+                            if self.memory_code_answer.upper() == self.memory_code:
+                                self.memory_code_accuracy = 1
+                            else:
+                                self.memory_code_accuracy = 0
+
+                            print(
+                                f"Code Answer = {self.memory_code_answer}, "
+                                f"Correct Code = {self.memory_code}"
+                            )
+
+                            self.current_state = 10
+                            self.state_start_time = time.time()
+
+                        else:
+                            self.memory_code_answer += event.unicode.upper()
+
                     # Safety Valve: Allow ESC key to break the infinite loop in Fullscreen mode.
                     if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                         running = False 
@@ -228,6 +343,28 @@ class CognitiveStimulusApp:
                             self.current_state = 1
                             self.state_start_time = time.time() # Reset stopwatch for State 1
                             print("Transitioned to STATE 1: Calibrating Extremes")
+
+                    # Transition from STATE 6 -> 7: Move to Task 2 when SPACE is pressed in state 6
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                        if self.current_state == 6:
+                            self.current_state = 7
+                            self.state_start_time = time.time()
+
+                            self.current_task = 2
+                            self.target_character = "O"
+
+                            self.memory_code = ''.join(
+                                 random.choices(
+                                      string.ascii_uppercase + string.digits,
+                                      k=4
+                                 )
+                            )
+                            self.code_presented = False
+                            self.code_flash_done = False
+
+                            self._generate_task_grid()
+
+                            print("Transitioned to TASK 2")
                 
                 #  LOGIC & STATE UPDATES i.e FSM
                 # Calculate exactly how many seconds have passed since the current state began.
@@ -269,16 +406,20 @@ class CognitiveStimulusApp:
                         self.current_state = 4
                         self.state_start_time = time.time()
 
+                        # Task 1 Configuration
+                        self.current_task = 1
+                        self.target_character = "Q"
+
                         # Build search grid once
                         self._generate_task_grid()
                         
                         # # Schedule shock event once
-                        self.shock_trigger_time = random.uniform(17.0, 23.0)
+                        #self.shock_trigger_time = random.uniform(17.0, 23.0)
 
-                        print(
-                            f"Shock scheduled at "
-                            f"{self.shock_trigger_time:.2f}s"
-                        )
+                        #print(
+                            #f"Shock scheduled at "
+                            #f"{self.shock_trigger_time:.2f}s"
+                        #)
 
                         print("Transitioned to STATE 4: Task Active")
                 
@@ -286,29 +427,42 @@ class CognitiveStimulusApp:
                 # STATE 4 ALGORITHM: Shock Trigger Logic
                 elif self.current_state == 4:
 
-                    # Fire shock event exactly once
-                    if (
-                        not self.shock_active
-                        and not self.shock_completed
-                        and time_in_state >= self.shock_trigger_time
-                    ):
-
-                        self.shock_active = True
-                        print("shock_active =", self.shock_active)
-
-                        self.shock_start_ms = int(time.time() * 1000)
-
-                        print("SHOCK EVENT TRIGGERED")
-
-                    # End visual search after 30 seconds
-                    if (
-                         time_in_state >= 30.0 
-                         and not self.shock_active
-                    ):
-
+                    # TASK 1 VISUAL SEARCH
+                    if time_in_state >= 15.0:
                         self.current_state = 5
                         self.state_start_time = time.time()
-                        print("Transitioned to STATE 5: Memory Recall")
+                        print("Task 1 Complete")
+
+                elif self.current_state == 7:
+
+                    # Show code once at 12 seconds
+                    if (
+                        time_in_state >= 10.0
+                        and not self.code_flash_done
+                    ):
+                        self.code_presented = True
+                        self.code_flash_done = True
+                        self.shock_display_start = time.time()
+
+                    # Hide code after 2.5 seconds
+                    if (
+                        self.code_presented
+                        and time.time() - self.shock_display_start >= 3.0
+                    ):
+                        self.code_presented = False
+
+                    if (
+                        self.code_flash_done
+                        and not self.code_presented
+                        and time.time() - self.shock_display_start >= 8.0
+                    ):
+                        self.current_state = 8
+                        self.state_start_time = time.time()
+
+                elif self.current_state == 10:
+
+                    if time_in_state >= 3.0:
+                        running = False
 
                 # Determine the correct flag string based on state
                 if self.current_state == 1:
@@ -524,7 +678,177 @@ class CognitiveStimulusApp:
                              )
 
                 elif self.current_state == 5:
+                    title_img = self.font.render(
+                        "TASK 1 COMPLETE",
+                        True,
+                        (0,255,255)
+                    )
 
+                    q_img = self.font.render(
+                        "How many Q's did you count?",
+                        True,
+                        (255,255,255)
+                    )
+
+                    answer_img = self.font.render(
+                        self.user_count_answer,
+                        True,
+                        (255,255,0)
+                    )
+
+                    hint_img = self.font.render(
+                        "Type number and press ENTER",
+                        True,
+                        (180,180,180)
+                    )
+
+                    self.screen.blit(
+                        title_img,
+                        title_img.get_rect(center=(self.width//2,150))
+                    )
+
+                    self.screen.blit(
+                        q_img,
+                        q_img.get_rect(center=(self.width//2,280))
+                    )
+
+                    self.screen.blit(
+                        answer_img,
+                        answer_img.get_rect(center=(self.width//2,380))
+                    )
+
+                    self.screen.blit(
+                        hint_img,
+                        hint_img.get_rect(center=(self.width//2,480))
+                    )
+                
+                #  STATE 6 RENDERING: Assessment Complete
+                elif self.current_state == 6:
+                    title_img = self.font.render(
+                        "TASK 2",
+                        True,
+                        (0,255,255)
+                    )
+
+                    line1 = self.font.render(
+                        "Count how many times 'O' appears.",
+                        True,
+                        (255,255,255)
+                    )
+
+                    
+                    line2 = self.font.render(
+                        "Press SPACEBAR to begin.",
+                        True,
+                        (255,255,0)
+                    )
+
+                    self.screen.blit(
+                        title_img,
+                        title_img.get_rect(center=(self.width//2,150))
+                    )
+
+                    self.screen.blit(
+                        line1,
+                        line1.get_rect(center=(self.width//2,250))
+                    )
+
+                    self.screen.blit(
+                        line2,
+                        line2.get_rect(center=(self.width//2,320))
+                    )
+
+                    
+
+                # STATE 7 RENDERING: Task 2 Visual Search Grid
+                elif self.current_state == 7:
+
+                    if self.code_presented:
+
+                        title_img = self.font.render(
+                            "MEMORIZE THIS CODE",
+                            True,
+                            (255,255,255)
+                        )
+
+                        code_img = self.font.render(
+                            self.memory_code,
+                            True,
+                            (255,255,0)
+                        )
+
+                        self.screen.blit(
+                            title_img,
+                            title_img.get_rect(
+                                center=(self.width//2,
+                                        self.height//2 - 60)
+                            )
+                        )
+
+                        self.screen.blit(
+                            code_img,
+                            code_img.get_rect(
+                                center=(self.width//2,
+                                        self.height//2 + 20)
+                            )
+                        )
+
+                    else:
+
+                        for cell in self.search_grid:
+                            self.screen.blit(
+                                cell["img"],
+                                cell["rect"]
+                            )
+
+                elif self.current_state == 8:
+
+                    title_img = self.font.render(
+                        "TASK 2 COMPLETE",
+                        True,
+                        (0,255,255)
+                    )
+
+                    q_img = self.font.render(
+                        "How many O's did you count?",
+                        True,
+                        (255,255,255)
+                    )
+
+                    answer_img = self.font.render(
+                        self.task2_user_answer,
+                        True,
+                        (255,255,0)
+                    )
+
+                    hint_img = self.font.render(
+                        "Type number and press ENTER",
+                        True,
+                        (180,180,180)
+                    )
+
+                    self.screen.blit(
+                        title_img,
+                        title_img.get_rect(center=(self.width//2,150))
+                    )
+
+                    self.screen.blit(
+                        q_img,
+                        q_img.get_rect(center=(self.width//2,280))
+                    )
+
+                    self.screen.blit(
+                        answer_img,
+                        answer_img.get_rect(center=(self.width//2,380))
+                    )
+
+                    self.screen.blit(
+                        hint_img,
+                        hint_img.get_rect(center=(self.width//2,480))
+                    )
+
+                elif self.current_state == 9:
+                    
                     title_img = self.font.render(
                         "MEMORY RECALL",
                         True,
@@ -532,92 +856,68 @@ class CognitiveStimulusApp:
                     )
 
                     q_img = self.font.render(
-                        "Which target were you searching for?",
+                        "What was the code?",
                         True,
                         (255,255,255)
                     )
 
-                    a_img = self.font.render(
-                        "A) Q",
+                    answer_img = self.font.render(
+                        self.memory_code_answer,
                         True,
-                        (255,255,255)
+                        (255,255,0)
                     )
 
-                    b_img = self.font.render(
-                        "B) M",
+                    hint_img = self.font.render(
+                        "Type code and press ENTER",
                         True,
-                        (255,255,255)
+                        (180,180,180)
                     )
-
-                    c_img = self.font.render(
-                        "C) T",
-                        True,
-                        (255,255,255)
-                    )
-
-                    d_img = self.font.render(
-                        "D) K",
-                        True,
-                        (255,255,255)
-                    )
-
 
                     self.screen.blit(
                         title_img,
                         title_img.get_rect(center=(self.width//2,150))
                     )
 
-
                     self.screen.blit(
                         q_img,
-                        q_img.get_rect(center=(self.width//2,250))
+                        q_img.get_rect(center=(self.width//2,280))
                     )
 
                     self.screen.blit(
-                        a_img,
-                        a_img.get_rect(center=(self.width//2,350))
+                        answer_img,
+                        answer_img.get_rect(center=(self.width//2,380))
                     )
 
                     self.screen.blit(
-                        b_img,
-                        b_img.get_rect(center=(self.width//2,420))
+                        hint_img,
+                        hint_img.get_rect(center=(self.width//2,480))
                     )
 
-                    self.screen.blit(
-                        c_img,
-                        c_img.get_rect(center=(self.width//2,490))
-                    )
+                elif self.current_state == 10:
 
-                    self.screen.blit(
-                        d_img,
-                        d_img.get_rect(center=(self.width//2,560))
-                    )
-                
-                #  STATE 6 RENDERING: Assessment Complete
-                elif self.current_state == 6:
-                    complete_img = self.font.render(
+                    title_img = self.font.render(
                         "ASSESSMENT COMPLETE",
                         True,
                         (0,255,0)
                     )
 
-                    score_img = self.font.render(
-                        f"Memory Score: {self.memory_score}",
+                    thanks_img = self.font.render(
+                        "Thank You For Participating",
                         True,
                         (255,255,255)
                     )
 
                     self.screen.blit(
-                        complete_img,
-                        complete_img.get_rect(
+                        title_img,
+                        title_img.get_rect(
                             center=(self.width//2,
                                     self.height//2 - 40)
                         )
                     )
 
                     self.screen.blit(
-                        score_img,
-                        score_img.get_rect(
+                        thanks_img,
+                        thanks_img.get_rect(
                             center=(self.width//2,
                                     self.height//2 + 40)
                         )
