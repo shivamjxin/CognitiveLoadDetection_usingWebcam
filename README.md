@@ -15,7 +15,7 @@
 
 <hr>
 
-<h2>⚙️ Architecture Overview</h2>
+<h2> Architecture Overview</h2>
 <p>To prevent UI rendering from bottlenecking the computer vision pipeline, this system utilizes a strict <strong>Decoupled Dual-Process Architecture</strong> synchronized over a local network using the Lab Streaming Layer (LSL).</p>
 <ul>
   <li><strong>The Camera Engine (<code>camera_engine.py</code>):</strong> Runs strictly at <strong>30Hz</strong>. Utilizes OpenCV and MediaPipe to extract facial landmarks and broadcast spatial telemetry.</li>
