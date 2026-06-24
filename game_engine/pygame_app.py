@@ -86,13 +86,22 @@ class CognitiveStimulusApp:
             self.shock_start_ms = None
             self.shock_resolved_ms = None
             self.reaction_time_ms = None
-            self.override_errors = 0 
+            self.override_errors = 0
+
+            # State 5 Memory Recall
+            self.memory_answer = ""
+            self.memory_score = 0
+
+            # Task timers
+            self.task_timer_start = None
+            self.task_timer_pause_start = None
+            self.total_pause_time = 0
 
             # EVENT GATE MEMORY (Prevents 60Hz LSL Spam while tracking keystrokes)
             self.previous_state = -1
             self.previous_calib_flag = ""
             self.previous_shock_active = False
-            self.previous_override_errors = 0 
+            self.previous_override_errors = 0
             self.previous_override_input = ""
             self.previous_user_count_answer = ""
             self.previous_task2_user_answer = ""
@@ -134,17 +143,23 @@ class CognitiveStimulusApp:
 
         self.correct_count = 0
 
+        # Determine how many target characters should be placed based on task
+        if self.current_task == 1:
+            target_count = 5
+        else:
+            target_count = 12
+
+        total_cells = grid_size * grid_size
+        target_positions = random.sample(range(total_cells), target_count)
+
         for row in range(grid_size):
             for col in range(grid_size):
+                cell_index = row * grid_size + col
+
                 center_x = start_x + (col * cell_size) + (cell_size // 2)
                 center_y = start_y + (row * cell_size) + (cell_size // 2)
 
-                if self.current_task == 1:
-                    target_probability = 0.10
-                else:
-                    target_probability = 0.18
-
-                if random.random() < target_probability:
+                if cell_index in target_positions:
                     char = self.target_character
                     color = (255, 255, 255)
                     self.correct_count += 1
@@ -254,6 +269,10 @@ class CognitiveStimulusApp:
                         if self.current_state == 6:
                             self.current_state = 7
                             self.state_start_time = time.time()
+
+                            self.task_timer_start = time.time()
+                            self.total_pause_time = 0
+
                             self.current_task = 2
                             self.target_character = "O"
                             self.memory_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
@@ -288,34 +307,46 @@ class CognitiveStimulusApp:
                     if time_in_state >= 10.0:
                         self.current_state = 4
                         self.state_start_time = time.time()
+
+                        self.task_timer_start = time.time() + 5
+                        self.total_pause_time = 0
+                        # Task 1 Configuration
+
                         self.current_task = 1
                         self.target_character = "Q"
                         self._generate_task_grid()
-                        self.shock_trigger_time = random.uniform(17.0, 23.0)
-                        print(f"Shock scheduled at {self.shock_trigger_time:.2f}s")
                         print("Transitioned to STATE 4: Task Active")
                 
                 elif self.current_state == 4:
-                    if (not self.shock_active and not self.shock_completed and time_in_state >= self.shock_trigger_time):
-                        self.shock_active = True
-                        self.shock_start_ms = int(time.time() * 1000)
-                        print("SHOCK EVENT TRIGGERED")
-
-                    if time_in_state >= 30.0 and not self.shock_active:
+                    if time_in_state >= 15.0:
                         self.current_state = 5
                         self.state_start_time = time.time()
                         print("Task 1 Complete")
 
                 elif self.current_state == 7:
-                    if (time_in_state >= 10.0 and not self.code_flash_done):
+                    if time_in_state >= 9.0 and not self.code_flash_done:
                         self.code_presented = True
                         self.code_flash_done = True
                         self.shock_display_start = time.time()
+                        self.task_timer_pause_start = time.time()
 
-                    if (self.code_presented and time.time() - self.shock_display_start >= 3.0):
+                    # Hide code after 2.5 seconds
+                    if (
+                        self.code_presented
+                        and time.time() - self.shock_display_start >= 2.5
+                    ):
                         self.code_presented = False
+                        self.total_pause_time += (
+                            time.time()
+                            - self.task_timer_pause_start
+                        )
 
-                    if (self.code_flash_done and not self.code_presented and time.time() - self.shock_display_start >= 8.0):
+                    # Transition to next state after 9 seconds since code presentation
+                    if (
+                        self.code_flash_done
+                        and not self.code_presented
+                        and time.time() - self.shock_display_start >= 9.0
+                    ):
                         self.current_state = 8
                         self.state_start_time = time.time()
 
@@ -387,6 +418,32 @@ class CognitiveStimulusApp:
                 radius = 30 
                 color = (0, 255, 0) 
                 
+                # TASK TIMER DISPLAY
+                # TASK 2 TIMER DISPLAY ONLY
+                if self.current_state == 7:
+
+                    elapsed = (
+                        time.time()
+                        - self.task_timer_start
+                        - self.total_pause_time
+                    )
+
+                    remaining = max(0, int(18 - elapsed))
+
+                    minutes = remaining // 60
+                    seconds = remaining % 60
+
+                    timer_img = self.font.render(
+                        f"TIME LEFT: {minutes:02}:{seconds:02}",
+                        True,
+                        (255, 80, 80)
+                    )
+
+                    self.screen.blit(
+                        timer_img,
+                        (self.width - 300, 20)
+                    )
+
                 if self.current_state == 0:
                     title_img = self.font.render("COGNITIVE LOAD ASSESSMENT", True, (0, 255, 255))
                     sub_img = self.font.render("Press SPACEBAR to begin...", True, (255, 255, 255))
@@ -462,22 +519,12 @@ class CognitiveStimulusApp:
                         self.screen.blit(sub_img, sub_img.get_rect(center=(self.width // 2, self.height // 2 + 10)))
                         self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
                     
-                    elif self.shock_active:
-                         self.screen.fill((180, 0, 0))
-
-                         title_img = self.font.render("TASK INTERRUPTED", True, (255, 255, 255))
-                         code_img = self.font.render(f"ENTER CODE: {self.safety_code}", True, (255, 255, 255)) 
-                         input_img = self.font.render(self.override_input, True, (255, 255, 0))
-                         debug_img = self.font.render(f"INPUT: {self.override_input}", True, (255, 255, 0))
-
-                         self.screen.blit(debug_img, debug_img.get_rect(center=(self.width // 2, self.height // 2 + 140)))
-                         self.screen.blit(title_img, title_img.get_rect(center=(self.width // 2, self.height // 2 - 80)))
-                         self.screen.blit(code_img, code_img.get_rect(center=(self.width // 2, self.height // 2)))
-                         self.screen.blit(input_img, input_img.get_rect(center=(self.width // 2, self.height // 2 + 80)))
-
                     else:
                         for cell in self.search_grid:
-                            self.screen.blit(cell["img"], cell["rect"])
+                            self.screen.blit(
+                                cell["img"],
+                                cell["rect"]
+                            )
 
                 elif self.current_state == 5:
                     title_img = self.font.render("TASK 1 COMPLETE", True, (0,255,255))
@@ -491,7 +538,7 @@ class CognitiveStimulusApp:
                     self.screen.blit(hint_img, hint_img.get_rect(center=(self.width//2,480)))
                 
                 elif self.current_state == 6:
-                    title_img = self.font.render("TASK 2", True, (0,255,255))
+                    title_img = self.font.render("TASK 2-HARD", True, (0,255,255))
                     line1 = self.font.render("Count how many times 'O' appears.", True, (255,255,255))
                     line2 = self.font.render("Press SPACEBAR to begin.", True, (255,255,0))
 
