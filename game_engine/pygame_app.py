@@ -419,17 +419,16 @@ class CognitiveStimulusApp:
                 color = (0, 255, 0) 
                 
                 # TASK TIMER DISPLAY
-                if self.current_state in [4, 7]:
+                # TASK 2 TIMER DISPLAY ONLY
+                if self.current_state == 7:
+
                     elapsed = (
                         time.time()
                         - self.task_timer_start
                         - self.total_pause_time
                     )
 
-                    if self.current_state == 4:
-                        remaining = max(0, int(10 - elapsed))
-                    else:
-                        remaining = max(0, int(18 - elapsed))
+                    remaining = max(0, int(18 - elapsed))
 
                     minutes = remaining // 60
                     seconds = remaining % 60
