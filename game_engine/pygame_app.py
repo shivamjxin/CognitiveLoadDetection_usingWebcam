@@ -122,6 +122,10 @@ class CognitiveStimulusApp:
             # State 5 Memory Recall
             self.memory_answer = ""
             self.memory_score = 0
+            # Task timers
+            self.task_timer_start = None
+            self.task_timer_pause_start = None
+            self.total_pause_time = 0
 
             #  EVENT GATE MEMORY (Prevents 60Hz LSL Spam)
             self.previous_state = -1
@@ -184,27 +188,30 @@ class CognitiveStimulusApp:
 
         self.correct_count = 0
 
+        # Determine how many target characters should be placed based on task
+        if self.current_task == 1:
+            target_count = 5
+        else:
+            target_count = 12
+
+        total_cells = grid_size * grid_size
+        target_positions = random.sample(range(total_cells), target_count)
+
         for row in range(grid_size):
             for col in range(grid_size):
+                cell_index = row * grid_size + col
                 # Calculate the exact pixel center for this specific cell
                 center_x = start_x + (col * cell_size) + (cell_size // 2)
                 center_y = start_y + (row * cell_size) + (cell_size // 2)
 
-                # 10% chance to spawn our target 'Q', otherwise pick a random letter
-                if self.current_task == 1:
-                    target_probability = 0.10
-                else:
-                    target_probability = 0.18
 
-                if random.random() < target_probability:
+                if cell_index in target_positions:
                     char = self.target_character
                     color = (255, 255, 255)
-
                     self.correct_count += 1
-                    
                 else:
                     char = random.choice(allowed_chars)
-                    color = (200, 200, 200) # Slightly dimmed white for distractor letters
+                    color = (200, 200, 200)
 
                 #  Render the text into an image surface NOW, 
                 # so the 60Hz loop only has to paste a picture, not render a font.
@@ -349,6 +356,8 @@ class CognitiveStimulusApp:
                         if self.current_state == 6:
                             self.current_state = 7
                             self.state_start_time = time.time()
+                            self.task_timer_start = time.time()
+                            self.total_pause_time = 0
 
                             self.current_task = 2
                             self.target_character = "O"
@@ -405,6 +414,8 @@ class CognitiveStimulusApp:
 
                         self.current_state = 4
                         self.state_start_time = time.time()
+                        self.task_timer_start = time.time() + 5
+                        self.total_pause_time = 0
 
                         # Task 1 Configuration
                         self.current_task = 1
@@ -435,26 +446,32 @@ class CognitiveStimulusApp:
 
                 elif self.current_state == 7:
 
-                    # Show code once at 12 seconds
+                    # Show code once at 9 seconds
                     if (
-                        time_in_state >= 10.0
+                        time_in_state >= 9.0
                         and not self.code_flash_done
                     ):
                         self.code_presented = True
                         self.code_flash_done = True
                         self.shock_display_start = time.time()
 
-                    # Hide code after 2.5 seconds
+                        self.task_timer_pause_start = time.time()
+
+                    # Hide code after 3 seconds
                     if (
                         self.code_presented
-                        and time.time() - self.shock_display_start >= 3.0
+                        and time.time() - self.shock_display_start >= 2.5
                     ):
                         self.code_presented = False
+                        self.total_pause_time += (
+                            time.time()
+                            - self.task_timer_pause_start
+                        )
 
                     if (
                         self.code_flash_done
                         and not self.code_presented
-                        and time.time() - self.shock_display_start >= 8.0
+                        and time.time() - self.shock_display_start >= 9.0
                     ):
                         self.current_state = 8
                         self.state_start_time = time.time()
@@ -504,6 +521,35 @@ class CognitiveStimulusApp:
                 
                 # Wipe the frame clean with a dark, non-fatiguing gray (RGB: 30, 30, 30)
                 self.screen.fill((30, 30, 30))  # wipes the screen clean before drawing
+                # TASK TIMER DISPLAY
+                if self.current_state in [4, 7]:
+                    elapsed = (
+                        time.time()
+                        - self.task_timer_start
+                        - self.total_pause_time
+                    )
+
+                    # Task 1 countdown
+                    if self.current_state == 4:
+                        remaining = max(0, int(10 - elapsed))
+
+                    # Task 2 countdown
+                    else:
+                        remaining = max(0, int(18 - elapsed))
+
+                    minutes = remaining // 60
+                    seconds = remaining % 60
+
+                    timer_img = self.font.render(
+                        f"TIME LEFT: {minutes:02}:{seconds:02}",
+                        True,
+                        (255, 80, 80)
+                    )
+
+                    self.screen.blit(
+                        timer_img,
+                        (self.width - 300, 20)
+                    )
                 radius = 30 # Pixel size of the target
                 color = (0, 255, 0) # High-visibility Neon Green 
                 
@@ -725,7 +771,7 @@ class CognitiveStimulusApp:
                 #  STATE 6 RENDERING: Assessment Complete
                 elif self.current_state == 6:
                     title_img = self.font.render(
-                        "TASK 2",
+                        "TASK 2-HARD",
                         True,
                         (0,255,255)
                     )
