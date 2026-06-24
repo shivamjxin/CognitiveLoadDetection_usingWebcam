@@ -315,17 +315,10 @@ class CognitiveStimulusApp:
                         self.current_task = 1
                         self.target_character = "Q"
                         self._generate_task_grid()
-                        self.shock_trigger_time = random.uniform(17.0, 23.0)
-                        print(f"Shock scheduled at {self.shock_trigger_time:.2f}s")
                         print("Transitioned to STATE 4: Task Active")
                 
                 elif self.current_state == 4:
-                    if (not self.shock_active and not self.shock_completed and time_in_state >= self.shock_trigger_time):
-                        self.shock_active = True
-                        self.shock_start_ms = int(time.time() * 1000)
-                        print("SHOCK EVENT TRIGGERED")
-
-                    if time_in_state >= 30.0 and not self.shock_active:
+                    if time_in_state >= 15.0:
                         self.current_state = 5
                         self.state_start_time = time.time()
                         print("Task 1 Complete")
@@ -527,22 +520,12 @@ class CognitiveStimulusApp:
                         self.screen.blit(sub_img, sub_img.get_rect(center=(self.width // 2, self.height // 2 + 10)))
                         self.screen.blit(timer_img, timer_img.get_rect(center=(self.width // 2, self.height // 2 + 70)))
                     
-                    elif self.shock_active:
-                         self.screen.fill((180, 0, 0))
-
-                         title_img = self.font.render("TASK INTERRUPTED", True, (255, 255, 255))
-                         code_img = self.font.render(f"ENTER CODE: {self.safety_code}", True, (255, 255, 255)) 
-                         input_img = self.font.render(self.override_input, True, (255, 255, 0))
-                         debug_img = self.font.render(f"INPUT: {self.override_input}", True, (255, 255, 0))
-
-                         self.screen.blit(debug_img, debug_img.get_rect(center=(self.width // 2, self.height // 2 + 140)))
-                         self.screen.blit(title_img, title_img.get_rect(center=(self.width // 2, self.height // 2 - 80)))
-                         self.screen.blit(code_img, code_img.get_rect(center=(self.width // 2, self.height // 2)))
-                         self.screen.blit(input_img, input_img.get_rect(center=(self.width // 2, self.height // 2 + 80)))
-
                     else:
                         for cell in self.search_grid:
-                            self.screen.blit(cell["img"], cell["rect"])
+                            self.screen.blit(
+                                cell["img"],
+                                cell["rect"]
+                            )
 
                 elif self.current_state == 5:
                     title_img = self.font.render("TASK 1 COMPLETE", True, (0,255,255))
