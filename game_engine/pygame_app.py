@@ -1,4 +1,5 @@
 import pygame
+import math
 import time
 import os
 import json
@@ -31,6 +32,7 @@ class CognitiveStimulusApp:
             self.native_width = screen_info.current_w
             self.native_height = screen_info.current_h
             self.font = pygame.font.SysFont(None, 48)
+            self.timer_font = pygame.font.SysFont(None, 60)
 
             # Boot into a movable window to access LabRecorder
             self.screen = pygame.display.set_mode((800, 600))
@@ -96,6 +98,8 @@ class CognitiveStimulusApp:
             self.task_timer_start = None
             self.task_timer_pause_start = None
             self.total_pause_time = 0
+            self.red_warning_triggered = False
+            self.red_warning_start = 0
 
             # EVENT GATE MEMORY (Prevents 60Hz LSL Spam while tracking keystrokes)
             self.previous_state = -1
@@ -127,14 +131,16 @@ class CognitiveStimulusApp:
             grid_size = 5
             cell_size = 100
         else:
-            grid_size = 8
-            cell_size = 70
+            grid_size = 10
+            cell_size = 60
         
         total_width = grid_size * cell_size
         total_height = grid_size * cell_size
 
         start_x = (self.width - total_width) // 2
         start_y = (self.height - total_height) // 2
+        self.grid_start_y = start_y
+        self.grid_start_x = start_x
 
         if self.current_task == 1:
             allowed_chars = list(string.ascii_uppercase.replace(self.target_character, ""))
@@ -147,7 +153,7 @@ class CognitiveStimulusApp:
         if self.current_task == 1:
             target_count = 5
         else:
-            target_count = 12
+            target_count = 13
 
         total_cells = grid_size * grid_size
         target_positions = random.sample(range(total_cells), target_count)
@@ -161,11 +167,11 @@ class CognitiveStimulusApp:
 
                 if cell_index in target_positions:
                     char = self.target_character
-                    color = (255, 255, 255)
                     self.correct_count += 1
                 else:
                     char = random.choice(allowed_chars)
-                    color = (200, 200, 200)
+
+                color = (255,255,255)
 
                 char_img = self.font.render(char, True, color)
                 char_rect = char_img.get_rect(center=(center_x, center_y))
@@ -324,7 +330,7 @@ class CognitiveStimulusApp:
                         print("Task 1 Complete")
 
                 elif self.current_state == 7:
-                    if time_in_state >= 9.0 and not self.code_flash_done:
+                    if time_in_state >= 10.0 and not self.code_flash_done:
                         self.code_presented = True
                         self.code_flash_done = True
                         self.shock_display_start = time.time()
@@ -345,7 +351,7 @@ class CognitiveStimulusApp:
                     if (
                         self.code_flash_done
                         and not self.code_presented
-                        and time.time() - self.shock_display_start >= 9.0
+                        and time.time() - self.shock_display_start >= 10.0
                     ):
                         self.current_state = 8
                         self.state_start_time = time.time()
@@ -428,21 +434,33 @@ class CognitiveStimulusApp:
                         - self.total_pause_time
                     )
 
-                    remaining = max(0, int(18 - elapsed))
+                    remaining = max(0, int(20 - elapsed))
+                    if remaining <= 5 and not self.red_warning_triggered:
+                          self.red_warning_triggered = True
+                          self.red_warning_start = time.time()
 
                     minutes = remaining // 60
                     seconds = remaining % 60
 
-                    timer_img = self.font.render(
-                        f"TIME LEFT: {minutes:02}:{seconds:02}",
-                        True,
-                        (255, 80, 80)
+                    if remaining <= 5:
+
+                          timer_color = (255, 0, 0)
+
+                          if time.time() - self.red_warning_start < 0.35:
+                                timer_font = pygame.font.SysFont(None, 80)
+                          else:
+                                timer_font = self.timer_font
+
+                    else:
+                          timer_color = (255, 255, 0)
+                          timer_font = self.timer_font
+
+                    timer_img = timer_font.render(
+                        f"TIME LEFT: {minutes:02}:{seconds:02}", True, timer_color
                     )
 
-                    self.screen.blit(
-                        timer_img,
-                        (self.width - 300, 20)
-                    )
+                    timer_rect = timer_img.get_rect(center=(self.width // 2, self.grid_start_y - 70))
+                    self.screen.blit(timer_img, timer_rect)
 
                 if self.current_state == 0:
                     title_img = self.font.render("COGNITIVE LOAD ASSESSMENT", True, (0, 255, 255))
