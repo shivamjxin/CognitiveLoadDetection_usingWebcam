@@ -1,4 +1,5 @@
 import pygame
+import math
 import time
 import os
 import json
@@ -31,6 +32,7 @@ class CognitiveStimulusApp:
             self.native_width = screen_info.current_w
             self.native_height = screen_info.current_h
             self.font = pygame.font.SysFont(None, 48)
+            self.timer_font = pygame.font.SysFont(None, 60)
 
             # Boot into a movable window to access LabRecorder
             self.screen = pygame.display.set_mode((800, 600))
@@ -54,13 +56,19 @@ class CognitiveStimulusApp:
             # Task Grid Memory
             self.search_grid = []
             self.target_character = "Q" 
-            self.correct_count = 0
 
-            # TASK RESULTS MEMORY
+            # TASK RESULTS MEMORY (ISOLATED & CONTINUOUS)
             self.current_task = 1
-            self.user_count_answer = ""
-            self.task2_user_answer = ""
-            self.count_accuracy = 0
+            
+            self.task1_ground_truth = 0
+            self.task1_answer = ""
+            self.task1_error = -1  # -1 indicates uncalculated/unanswered
+            self.task1_backspaces = 0
+
+            self.task2_ground_truth = 0
+            self.task2_answer = ""
+            self.task2_error = -1
+            self.task2_backspaces = 0
 
             # Shock display timing
             self.shock_display_start = None
@@ -70,42 +78,28 @@ class CognitiveStimulusApp:
             # MEMORY CODE TASK
             self.memory_code = ""
             self.memory_code_answer = ""
-            self.memory_code_accuracy = 0
+            self.memory_code_error = -1 # Continuous string error metric
+            self.memory_code_backspaces = 0
 
             # STATE 4: TASK SHIFT SHOCK ENGINE
-            self.shock_trigger_time = None
-            self.shock_active = False
-            self.shock_completed = False
             self.just_entered_state9 = False
-
-            # Override challenge
-            self.safety_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-            self.override_input = ""
-
-            # Performance metrics
-            self.shock_start_ms = None
-            self.shock_resolved_ms = None
-            self.reaction_time_ms = None
-            self.override_errors = 0
-
-            # State 5 Memory Recall
-            self.memory_answer = ""
-            self.memory_score = 0
 
             # Task timers
             self.task_timer_start = None
             self.task_timer_pause_start = None
             self.total_pause_time = 0
+            self.red_warning_triggered = False
+            self.red_warning_start = 0
 
             # EVENT GATE MEMORY (Prevents 60Hz LSL Spam while tracking keystrokes)
             self.previous_state = -1
             self.previous_calib_flag = ""
-            self.previous_shock_active = False
-            self.previous_override_errors = 0
-            self.previous_override_input = ""
-            self.previous_user_count_answer = ""
-            self.previous_task2_user_answer = ""
+            self.previous_task1_answer = ""
+            self.previous_task2_answer = ""
             self.previous_memory_code_answer = ""
+            self.previous_task1_backspaces = 0
+            self.previous_task2_backspaces = 0
+            self.previous_memory_code_backspaces = 0
 
             # LSL TELEMETRY CONNECTION (CROSS-PROCESS SYNC)
             print("Initializing UI LSL Stream...")
@@ -126,28 +120,30 @@ class CognitiveStimulusApp:
         if self.current_task == 1:
             grid_size = 5
             cell_size = 100
+            self.task1_ground_truth = 0
         else:
-            grid_size = 8
-            cell_size = 70
+            grid_size = 10
+            cell_size = 60
+            self.task2_ground_truth = 0
         
         total_width = grid_size * cell_size
         total_height = grid_size * cell_size
 
         start_x = (self.width - total_width) // 2
         start_y = (self.height - total_height) // 2
+        self.grid_start_y = start_y
+        self.grid_start_x = start_x
 
         if self.current_task == 1:
             allowed_chars = list(string.ascii_uppercase.replace(self.target_character, ""))
         else:
             allowed_chars = ["Q", "Q", "Q", "C", "D", "G"]
 
-        self.correct_count = 0
-
         # Determine how many target characters should be placed based on task
         if self.current_task == 1:
             target_count = 5
         else:
-            target_count = 12
+            target_count = 13
 
         total_cells = grid_size * grid_size
         target_positions = random.sample(range(total_cells), target_count)
@@ -161,11 +157,14 @@ class CognitiveStimulusApp:
 
                 if cell_index in target_positions:
                     char = self.target_character
-                    color = (255, 255, 255)
-                    self.correct_count += 1
+                    if self.current_task == 1:
+                        self.task1_ground_truth += 1
+                    else:
+                        self.task2_ground_truth += 1
                 else:
                     char = random.choice(allowed_chars)
-                    color = (200, 200, 200)
+
+                color = (255,255,255)
 
                 char_img = self.font.render(char, True, color)
                 char_rect = char_img.get_rect(center=(center_x, center_y))
@@ -184,52 +183,35 @@ class CognitiveStimulusApp:
                 
                 # EVENT PROCESSING 
                 for event in pygame.event.get():
-                    if self.shock_active and event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_BACKSPACE:
-                            self.override_input = self.override_input[:-1]
-                        elif event.key == pygame.K_RETURN:
-                            if self.override_input == self.safety_code:
-                                self.shock_resolved_ms = int(time.time() * 1000)
-                                self.reaction_time_ms = (self.shock_resolved_ms - self.shock_start_ms)
-                                self.shock_active = False
-                                self.shock_completed = True
-                                print(f"Shock resolved in {self.reaction_time_ms} ms")
-                            else:
-                                self.override_errors += 1
-                                self.override_input = ""
-                        else:
-                            self.override_input += event.unicode.upper()
 
                     if self.current_state == 5 and event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_BACKSPACE:
-                            self.user_count_answer = self.user_count_answer[:-1]
+                            self.task1_answer = self.task1_answer[:-1]
+                            self.task1_backspaces += 1
                         elif event.key == pygame.K_RETURN:
-                            if self.user_count_answer.isdigit():
-                                if int(self.user_count_answer) == self.correct_count:
-                                    self.count_accuracy = 1
-                                else:
-                                    self.count_accuracy = 0
-                                print(f"Task 1 Answer = {self.user_count_answer}, Correct = {self.correct_count}")
+                            if self.task1_answer.isdigit():
+                                # Continuous Error Math
+                                self.task1_error = abs(self.task1_ground_truth - int(self.task1_answer))
+                                print(f"Task 1 Answer = {self.task1_answer}, Ground Truth = {self.task1_ground_truth}, Error = {self.task1_error}")
                                 self.current_state = 6
                         elif event.unicode.isdigit():
-                            self.user_count_answer += event.unicode
+                            self.task1_answer += event.unicode
 
                     if self.current_state == 8 and event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_BACKSPACE:
-                            self.task2_user_answer = self.task2_user_answer[:-1]
+                            self.task2_answer = self.task2_answer[:-1]
+                            self.task2_backspaces += 1
                         elif event.key == pygame.K_RETURN:
-                            if self.task2_user_answer.isdigit():
-                                if int(self.task2_user_answer) == self.correct_count:
-                                    self.count_accuracy = 1
-                                else:
-                                    self.count_accuracy = 0
-                                print(f"Task 2 Answer = {self.task2_user_answer}, Correct = {self.correct_count}")
+                            if self.task2_answer.isdigit():
+                                # Continuous Error Math
+                                self.task2_error = abs(self.task2_ground_truth - int(self.task2_answer))
+                                print(f"Task 2 Answer = {self.task2_answer}, Ground Truth = {self.task2_ground_truth}, Error = {self.task2_error}")
                                 
                                 self.current_state = 9
                                 self.state_start_time = time.time()
                                 self.just_entered_state9 = True
                         elif event.unicode.isdigit():
-                            self.task2_user_answer += event.unicode
+                            self.task2_answer += event.unicode
 
                     if self.current_state == 9 and event.type == pygame.KEYDOWN:
                         if self.just_entered_state9:
@@ -238,12 +220,20 @@ class CognitiveStimulusApp:
 
                         if event.key == pygame.K_BACKSPACE:
                             self.memory_code_answer = self.memory_code_answer[:-1]
+                            self.memory_code_backspaces += 1
                         elif event.key == pygame.K_RETURN:
-                            if self.memory_code_answer.upper() == self.memory_code:
-                                self.memory_code_accuracy = 1
-                            else:
-                                self.memory_code_accuracy = 0
-                            print(f"Code Answer = {self.memory_code_answer}, Correct Code = {self.memory_code}")
+                            
+                            # Robust String Error Calculation (Handles short, long, and mismatched inputs)
+                            ans = self.memory_code_answer.upper()
+                            tgt = self.memory_code
+                            
+                            padded_ans = ans.ljust(len(tgt))
+                            char_diffs = sum(1 for a, b in zip(padded_ans[:len(tgt)], tgt) if a != b)
+                            length_penalty = max(0, len(ans) - len(tgt))
+                            
+                            self.memory_code_error = char_diffs + length_penalty
+
+                            print(f"Code Answer = {ans}, Target = {tgt}, Error = {self.memory_code_error}")
                             self.current_state = 10
                             self.state_start_time = time.time()
                         else:
@@ -324,7 +314,7 @@ class CognitiveStimulusApp:
                         print("Task 1 Complete")
 
                 elif self.current_state == 7:
-                    if time_in_state >= 9.0 and not self.code_flash_done:
+                    if time_in_state >= 10.0 and not self.code_flash_done:
                         self.code_presented = True
                         self.code_flash_done = True
                         self.shock_display_start = time.time()
@@ -345,7 +335,7 @@ class CognitiveStimulusApp:
                     if (
                         self.code_flash_done
                         and not self.code_presented
-                        and time.time() - self.shock_display_start >= 9.0
+                        and time.time() - self.shock_display_start >= 10.0
                     ):
                         self.current_state = 8
                         self.state_start_time = time.time()
@@ -375,43 +365,43 @@ class CognitiveStimulusApp:
                     "active_task": self.current_task,
                     "target_character": self.target_character,
                     
-                    "task_shift_active": self.shock_active,
-                    "safety_code_target": self.safety_code,
-                    "override_input_current": self.override_input,
-                    "reaction_time_ms": self.reaction_time_ms,
-                    "override_errors": self.override_errors,
+                    "task1_ground_truth": self.task1_ground_truth,
+                    "task1_answer": self.task1_answer,
+                    "task1_error": self.task1_error,
+                    "task1_backspaces": self.task1_backspaces,
                     
-                    "ground_truth_count": self.correct_count,
-                    "user_count_answer": self.user_count_answer, 
-                    "task2_user_answer": self.task2_user_answer, 
-                    "count_accuracy": self.count_accuracy,       
+                    "task2_ground_truth": self.task2_ground_truth,
+                    "task2_answer": self.task2_answer,
+                    "task2_error": self.task2_error,
+                    "task2_backspaces": self.task2_backspaces,
                     
                     "memory_code_target": self.memory_code,
                     "memory_code_answer": self.memory_code_answer,
-                    "memory_code_accuracy": self.memory_code_accuracy
+                    "memory_code_error": self.memory_code_error,
+                    "memory_code_backspaces": self.memory_code_backspaces
                 }
                 
                 # Push if ANY tracked variable changes (Logs keystrokes instantly)
                 if (self.current_state != self.previous_state or 
                     calib_flag != self.previous_calib_flag or 
-                    self.shock_active != self.previous_shock_active or
-                    self.override_errors != self.previous_override_errors or
-                    self.override_input != self.previous_override_input or
-                    self.user_count_answer != self.previous_user_count_answer or
-                    self.task2_user_answer != self.previous_task2_user_answer or
-                    self.memory_code_answer != self.previous_memory_code_answer):
+                    self.task1_answer != self.previous_task1_answer or
+                    self.task2_answer != self.previous_task2_answer or
+                    self.memory_code_answer != self.previous_memory_code_answer or
+                    self.task1_backspaces != self.previous_task1_backspaces or
+                    self.task2_backspaces != self.previous_task2_backspaces or
+                    self.memory_code_backspaces != self.previous_memory_code_backspaces):
                     
                     self.ui_outlet.push_sample([json.dumps(log_packet)])
                     
                     # Update memory block
                     self.previous_state = self.current_state
                     self.previous_calib_flag = calib_flag
-                    self.previous_shock_active = self.shock_active
-                    self.previous_override_errors = self.override_errors
-                    self.previous_override_input = self.override_input
-                    self.previous_user_count_answer = self.user_count_answer
-                    self.previous_task2_user_answer = self.task2_user_answer
+                    self.previous_task1_answer = self.task1_answer
+                    self.previous_task2_answer = self.task2_answer
                     self.previous_memory_code_answer = self.memory_code_answer
+                    self.previous_task1_backspaces = self.task1_backspaces
+                    self.previous_task2_backspaces = self.task2_backspaces
+                    self.previous_memory_code_backspaces = self.memory_code_backspaces
                 
                 # VISUAL RENDERING
                 self.screen.fill((30, 30, 30))  
@@ -420,7 +410,7 @@ class CognitiveStimulusApp:
                 
                 # TASK TIMER DISPLAY
                 # TASK 2 TIMER DISPLAY ONLY
-                if self.current_state == 7:
+                if self.current_state == 7 and not self.code_presented:
 
                     elapsed = (
                         time.time()
@@ -428,21 +418,33 @@ class CognitiveStimulusApp:
                         - self.total_pause_time
                     )
 
-                    remaining = max(0, int(18 - elapsed))
+                    remaining = max(0, int(20 - elapsed))
+                    if remaining <= 5 and not self.red_warning_triggered:
+                          self.red_warning_triggered = True
+                          self.red_warning_start = time.time()
 
                     minutes = remaining // 60
                     seconds = remaining % 60
 
-                    timer_img = self.font.render(
-                        f"TIME LEFT: {minutes:02}:{seconds:02}",
-                        True,
-                        (255, 80, 80)
+                    if remaining <= 5:
+
+                          timer_color = (255, 0, 0)
+
+                          if time.time() - self.red_warning_start < 0.35:
+                                timer_font = pygame.font.SysFont(None, 80)
+                          else:
+                                timer_font = self.timer_font
+
+                    else:
+                          timer_color = (255, 255, 0)
+                          timer_font = self.timer_font
+
+                    timer_img = timer_font.render(
+                        f"TIME LEFT: {minutes:02}:{seconds:02}", True, timer_color
                     )
 
-                    self.screen.blit(
-                        timer_img,
-                        (self.width - 300, 20)
-                    )
+                    timer_rect = timer_img.get_rect(center=(self.width // 2, self.grid_start_y - 70))
+                    self.screen.blit(timer_img, timer_rect)
 
                 if self.current_state == 0:
                     title_img = self.font.render("COGNITIVE LOAD ASSESSMENT", True, (0, 255, 255))
@@ -529,7 +531,7 @@ class CognitiveStimulusApp:
                 elif self.current_state == 5:
                     title_img = self.font.render("TASK 1 COMPLETE", True, (0,255,255))
                     q_img = self.font.render("How many Q's did you count?", True, (255,255,255))
-                    answer_img = self.font.render(self.user_count_answer, True, (255,255,0))
+                    answer_img = self.font.render(self.task1_answer, True, (255,255,0))
                     hint_img = self.font.render("Type number and press ENTER", True, (180,180,180))
 
                     self.screen.blit(title_img, title_img.get_rect(center=(self.width//2,150)))
@@ -559,7 +561,7 @@ class CognitiveStimulusApp:
                 elif self.current_state == 8:
                     title_img = self.font.render("TASK 2 COMPLETE", True, (0,255,255))
                     q_img = self.font.render("How many O's did you count?", True, (255,255,255))
-                    answer_img = self.font.render(self.task2_user_answer, True, (255,255,0))
+                    answer_img = self.font.render(self.task2_answer, True, (255,255,0))
                     hint_img = self.font.render("Type number and press ENTER", True, (180,180,180))
 
                     self.screen.blit(title_img, title_img.get_rect(center=(self.width//2,150)))
