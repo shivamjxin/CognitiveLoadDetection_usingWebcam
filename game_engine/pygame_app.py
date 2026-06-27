@@ -426,7 +426,7 @@ class CognitiveStimulusApp:
                 
                 # TASK TIMER DISPLAY
                 # TASK 2 TIMER DISPLAY ONLY
-                if self.current_state == 7:
+                if self.current_state == 7 and not self.code_presented:
 
                     elapsed = (
                         time.time()
