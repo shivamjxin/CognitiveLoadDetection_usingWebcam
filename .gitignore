@@ -5,3 +5,4 @@ __pycache__/
 local_config.json
 data_logs/*.xdf
 data_logs/*.csv
+data_logs/processed
