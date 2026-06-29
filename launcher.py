@@ -221,10 +221,8 @@ def boot_system():
             camera_process.terminate()
         if ui_process.poll() is None:
             ui_process.terminate()
-        if lr_process.poll() is None:
-            lr_process.terminate()
             
-        print("[SYSTEM] All hardware hooks disconnected safely.")
+        print("[SYSTEM] All hardware hooks disconnected safely. Please press stop on labrecorder")
 
 if __name__ == "__main__":
     install_requirements()
