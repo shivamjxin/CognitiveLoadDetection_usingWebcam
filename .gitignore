@@ -3,4 +3,6 @@ data_logs/*.jsonl
 __pycache__/
 *.pyc
 local_config.json
-data_logs/sub-P001
+data_logs/*.xdf
+data_logs/*.csv
+data_logs/processed
