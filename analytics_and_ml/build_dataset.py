@@ -9,9 +9,6 @@ import json
 CV_STREAM_NAME = 'WebcamFaceMetrics' 
 GAME_STREAM_NAME = 'PygameGameEvents'
 
-# The orientation reflex buffer or reflex lag. 
-TRANSITION_BUFFER_SEC = 1.0 
-
 def extract_and_sync_xdf(xdf_file_path):
     """
     Open a single .xdf file, extracts the 30Hz CV and 60Hz Game streams,
@@ -69,7 +66,7 @@ def extract_and_sync_xdf(xdf_file_path):
     if 'state_id' in df_game.columns:
         df_game.rename(columns={'state_id': 'FSM_State'}, inplace=True)
 
-    
+
     # pandas asofmerge does binary search for which chronological order is required
     df_cv = df_cv.sort_values('timestamp')
     df_game = df_game.sort_values('timestamp')
@@ -92,27 +89,8 @@ def extract_and_sync_xdf(xdf_file_path):
 
     df_merged = df_merged.dropna(subset=['FSM_State'])
 
-    # relex lag deletion and purging 1s 
-    # We locate every exact moment the user's game state changed.
-    state_changes = df_merged[df_merged['FSM_State'].shift() != df_merged['FSM_State']]
-    
-    keep_mask = pd.Series(True, index=df_merged.index)
-    frames_dropped = 0
-
-    for idx, row in state_changes.iterrows():
-        # Skip the very first state initialization (usually just booting the app)
-        if idx == df_merged.index[0]: 
-            continue 
-            
-        change_time = row['timestamp']
-        
-        # Flag all camera frames that occurred within [0 to 1.0] seconds after the state changed
-        drop_condition = (df_merged['timestamp'] >= change_time) & (df_merged['timestamp'] <= change_time + TRANSITION_BUFFER_SEC)
-        keep_mask = keep_mask & ~drop_condition
-        frames_dropped += drop_condition.sum()
-
     # Apply the mask to purge the transitional noise
-    df_clean = df_merged[keep_mask].copy()
+    df_clean = df_merged.copy()
     
     # Attach the session ID so we can group by user later in the ML pipeline
     df_clean['Session_ID'] = session_id
@@ -121,7 +99,7 @@ def extract_and_sync_xdf(xdf_file_path):
     first_timestamp = df_clean['timestamp'].iloc[0]
     df_clean['Relative_Time_Sec'] = df_clean['timestamp'] - first_timestamp
 
-    print(f"[{session_id}] Success. Synced {len(df_clean)} frames. Dropped {frames_dropped} transitional frames.")
+    print(f"[{session_id}] Success. Synced {len(df_clean)} frames.")
     return df_clean
 
 def build_dataset(input_dir, output_filepath):
